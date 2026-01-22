@@ -4,10 +4,10 @@ from datetime import datetime
 
 # === КОНФІГУРАЦІЯ ===
 FORMS_CONFIG = [
-    {
-        "name": "Лікарі",
-        "url": "https://docs.google.com/spreadsheets/d/1cWbKDyAJNjzTgb0ZsmBSXmp7v4TyzqjGAGs8mcc5n2M/viewform?embedded=true",
-        "tags": ["Серце", "Неврологія"],
+    {   "id": "doctor_form",
+        "name": "Лікар",
+        "url": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR4Fkc0NoXeUR3pPuJXfJvf48jIrLPYeFiQyF7kWAT4W5ilsPddahcVjYpg15N-uJqbKzrps5nUPUiQ/pub?gid=584209057&single=true&output=csv",
+        "tags": ["Findrisc", "SCORE2"],
         # ДОДАЄМО МАПУ ІМЕН:
         # "стандартна_назва": "назва_у_вашій_гугл_формі"
         "identity_map": {
@@ -16,16 +16,35 @@ FORMS_CONFIG = [
         }
     },
     # Для другої форми так само:
-    {
-        "name": "Комплекс 2",
-        "url": "hhttps://docs.google.com/spreadsheets/d/1xXjuhfnu0opui-XrAmfrr_-m0Qe_gHDBGiTMXEQaP4Y/viewform?embedded=true",
-        "tags": ["Шлунок", "Зір"],
+    {   "id": "patient_form",
+        "name": "Пацієнт",
+        "url": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSF_ZRq1NV9VwXR8PA9YPVCqIJ1MRwoZnA2Ec0Sz4CMMhU98dZIZU4BtIo4pH6oM7J4-E_VasWzCEqM/pub?gid=330455959&single=true&output=csv",
+        "tags": ["SCORE2", "Зір"],
         "identity_map": {
             "Name": "ПІБ",  # Тут може бути інша назва
             "DOB": "Дата народження"
         }
     }
 ]
+FORMS_CONFIG = [
+    {
+        "id": "doctor_form",
+        "name": "Частина 1: Огляд лікаря",
+        "url":"https://docs.google.com/spreadsheets/d/1cWbKDyAJNjzTgb0ZsmBSXmp7v4TyzqjGAGs8mcc5n2M/viewform?embedded=true",
+        # 2 Тести лікаря (наприклад, Фізикальний огляд + Анамнез)
+        "tags": ["Огляд", "Анамнез"], 
+        "identity_map": {"Name": "ПІБ пацієнта", "DOB": "Дата народження"}
+    },
+    {
+        "id": "patient_form",
+        "name": "Частина 2: Опитувальник пацієнта",
+        "url": "ПОСИЛАННЯ_НА_ФОРМУ_ПАЦІЄНТА_CSV",
+        # 4 Тести пацієнта
+        "tags": ["Спосіб_життя", "Скарги", "Психологія", "Спадковість"],
+        "identity_map": {"Name": "Ваше Прізвище та Ім'я", "DOB": "Ваша дата народження"}
+    }
+]
+
 
 @st.cache_data(ttl=60)
 def get_processed_data():
