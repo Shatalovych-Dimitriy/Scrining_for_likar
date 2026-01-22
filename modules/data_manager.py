@@ -19,81 +19,132 @@ FORMS_CONFIG = [
     {   "id": "patient_form",
         "name": "Пацієнт",
         "url": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSF_ZRq1NV9VwXR8PA9YPVCqIJ1MRwoZnA2Ec0Sz4CMMhU98dZIZU4BtIo4pH6oM7J4-E_VasWzCEqM/pub?gid=330455959&single=true&output=csv",
-        "tags": ["SCORE2", "Зір"],
+        "tags": ["PHQ", "GAD","Паління","AUDIT"],
         "identity_map": {
             "Name": "ПІБ",  # Тут може бути інша назва
             "DOB": "Дата народження"
         }
     }
 ]
-FORMS_CONFIG = [
-    {
-        "id": "doctor_form",
-        "name": "Частина 1: Огляд лікаря",
-        "url":"https://docs.google.com/spreadsheets/d/1cWbKDyAJNjzTgb0ZsmBSXmp7v4TyzqjGAGs8mcc5n2M/viewform?embedded=true",
-        # 2 Тести лікаря (наприклад, Фізикальний огляд + Анамнез)
-        "tags": ["Огляд", "Анамнез"], 
-        "identity_map": {"Name": "ПІБ пацієнта", "DOB": "Дата народження"}
-    },
-    {
-        "id": "patient_form",
-        "name": "Частина 2: Опитувальник пацієнта",
-        "url": "ПОСИЛАННЯ_НА_ФОРМУ_ПАЦІЄНТА_CSV",
-        # 4 Тести пацієнта
-        "tags": ["Спосіб_життя", "Скарги", "Психологія", "Спадковість"],
-        "identity_map": {"Name": "Ваше Прізвище та Ім'я", "DOB": "Ваша дата народження"}
+def process_doctor_data(df):
+    
+    """Обробка 2 тестів лікаря"""
+    # Тут ваша логіка для тегів [Огляд] і [Анамнез]
+    # Наприклад:
+    # df['Score_Огляд'] = ...
+    # df['Verdict_Огляд'] = ...
+    
+    # === ВАЖЛИВО: Ставимо "печатку", що лікар роботу зробив ===
+    df['Status_Doctor_Done'] = True
+    return df
+
+def process_patient_data(df):
+    points_map_GAD = {
+        "Ніколи": 0, "Кілька днів": 1, "Понад половину часу": 2, 
+        "Майже щодня": 3
     }
-]
+        points_map_PHQ = {
+        "Не турбували взагалі": 0, "Протягом декількох днів": 1, "Більше половини цього часу": 2, 
+        "Майже кожного дня": 3
+    }
+    def calculate_pyl_score(row,teg, map):
+        score = 0
+        for question, answer in row.items():
+            # Перевіряємо, чи питання належить до Огляду
+            if teg in str(question):
+                # Шукаємо відповідь у нашому словнику балів
+                # str(answer) потрібно, щоб не впало, якщо там число
+                if str(answer) in map:
+                    score += points_map[str(answer)]
+        return score
 
+    #PHQ
+    df['Score_PHQ']=df.apply(
+        calculate_pyl_score, 
+        axis=1, 
+        teg=['PHQ'],  # Передаємо значення
+        map=points_map_PHQ        # Передаємо значення
+        )
+    # 1. Визначаємо функцію вердикту згідно з таблицею
+    def get_depression_verdict(s):
+        # Перевіряємо від найвищого до найнижчого
+        if s >= 20: return "🔴 Тяжка депресія"
+        if s >= 15: return "🟠 Середньої тяжкості депресія"
+        if s >= 10: return "🟡 Помірної тяжкості депресія"
+        if s >= 5:  return "🟢 Легка («субклінічна») депресія"
+        return "⚪ Депресія відсутня" # 0-4 бали
 
-@st.cache_data(ttl=60)
-def get_processed_data():
-    all_data = []
-
-    for form_conf in FORMS_CONFIG:
-        try:
-            df = pd.read_csv(form_conf["url"])
-            
-            # 1. Стандартизація Часу (автоматично)
-            time_col = next((col for col in df.columns if 'time' in col.lower() or 'час' in col.lower()), None)
-            if time_col:
-                df.rename(columns={time_col: 'Timestamp'}, inplace=True)
-                df['Timestamp'] = pd.to_datetime(df['Timestamp'])
-            
-            # 2. === НОВЕ: Стандартизація Імені та Дати ===
-            # Ми перейменовуємо колонки форми у стандартні 'Name' і 'DOB'
-            # щоб програма завжди знала, де їх шукати
-            id_map = form_conf.get("identity_map", {})
-            
-            # Перевертаємо мапу для rename (Гугл Назва -> Наша Назва)
-            rename_dict = {v: k for k, v in id_map.items()} 
-            df.rename(columns=rename_dict, inplace=True)
-
-            # 3. Додаткова обробка (Вік)
-            if 'DOB' in df.columns:
-                # Конвертуємо у дату (Google Forms іноді дає різні формати)
-                df['DOB'] = pd.to_datetime(df['DOB'], dayfirst=True, errors='coerce')
-                # Рахуємо вік
-                df['Age'] = df['DOB'].apply(calculate_age)
-
-            df['Form_Source'] = form_conf["name"]
-            
-            # 4. Рахуємо бали (Тільки по тегах!)
-            df = calculate_multi_scores(df, form_conf["tags"])
-            
-            all_data.append(df)
-            
-        except Exception as e:
-            print(f"Помилка {form_conf['name']}: {e}")
-
-    if all_data:
-        # concat з'єднає колонки Name з різних таблиць в одну
-        return pd.concat(all_data, ignore_index=True)
-    return pd.DataFrame()
-
+    # 2. Застосовуємо її (замість лямбди)
+    # Припускаємо, що колонка з балами називається 'Score_PHQ9' (або ваша назва)
+    df['Verdict_PHQ'] = df['Score_PHQ'].apply(get_depression_verdict)
+    
+    df['Status_Patient_Done'] = True
+    return df
+    
 def calculate_age(born):
     """Допоміжна функція розрахунку віку"""
     if pd.isnull(born):
         return 0
     today = datetime.today()
     return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+    
+# === 3. ГОЛОВНИЙ МЕРДЖЕР (ОБ'ЄДНУВАЧ) ===
+@st.cache_data(ttl=60)
+def get_processed_data():
+    dfs_to_merge = []
+
+    for conf in FORMS_CONFIG:
+        try:
+            df = pd.read_csv(conf["url"])
+            
+            # Стандартизація (Ім'я, Час, Дата) - код із попередніх прикладів
+            df = _standardize_columns(df, conf) 
+            
+            # Видаляємо дублікати (беремо найсвіжіший запис)
+            if 'Timestamp' in df.columns:
+                df = df.sort_values('Timestamp', ascending=False)
+            df = df.drop_duplicates(subset=['Name', 'DOB'], keep='first')
+
+            # Викликаємо відповідну обробку
+            # Для цього ми використовуємо функцію calculate_multi_scores (універсальну)
+            # або ваші специфічні, якщо логіка складна.
+            # Для прикладу тут виклик універсальної з тегами:
+            df = calculate_multi_scores(df, conf["tags"])
+            
+            # Додаємо статус
+            if conf["id"] == "doctor_form":
+                df['Status_Doctor_Done'] = True
+            elif conf["id"] == "patient_form":
+                df['Status_Patient_Done'] = True
+
+            dfs_to_merge.append(df)
+            
+        except Exception as e:
+            print(f"Помилка {conf['name']}: {e}")
+
+    if not dfs_to_merge:
+        return pd.DataFrame()
+
+    # === ЗШИВАННЯ (OUTER JOIN) ===
+    # how='outer' гарантує: якщо є тільки форма лікаря - рядок буде.
+    # якщо є тільки форма пацієнта - рядок теж буде.
+    # якщо є обидві - вони з'єднаються.
+    try:
+        full_df = reduce(
+            lambda left, right: pd.merge(
+                left, right, 
+                on=['Name', 'DOB'], 
+                how='outer', 
+                suffixes=('_doc', '_pat')
+            ), 
+            dfs_to_merge
+        )
+        
+        # Об'єднуємо Timestamp і Age з різних таблиць, щоб не було дірок
+        # (код очистки Timestamp і Age такий самий, як я писав раніше)
+        
+        return full_df
+    except Exception as e:
+        st.error(f"Помилка злиття даних: {e}")
+        return pd.DataFrame()
+
