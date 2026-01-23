@@ -158,7 +158,7 @@ def get_score2_verdict_row(row):
 
     if is_green(): return "🟢 Зелений"
     elif is_yellow(): return "🟡 Жовтий"
-    else: return "🔴 червоний"
+    else: return "🔴 Червоний"
 
 # ==========================================
 # 3. ФУНКЦІЇ ОБРОБКИ ДАНИХ
