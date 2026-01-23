@@ -257,14 +257,15 @@ def process_doctor_data(df):
         # (У вашому попередньому коді були інші межі, я поставив стандартні Findrisk, але перевірте їх)
         df[col_waist] = np.select(conditions, [4, 3], default=0)
 
-    # Sum Score
+
     findrisc_cols = [c for c in df.columns if '[Findrisc]' in c]
     # Перетворюємо все у числа
     for c in findrisc_cols:
         df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
         
-    df['Score_FINDRISC'] = df[findrisc_cols].sum(axis=1)
-    df['Verdict_FINDRISC'] = df['Score_FINDRISC'].apply(get_findrisc_verdict)
+    # === ВИПРАВЛЕННЯ ТУТ: міняємо 'FINDRISC' (C) на 'FINDRISK' (K) ===
+    df['Score_FINDRISK'] = df[findrisc_cols].sum(axis=1)
+    df['Verdict_FINDRISK'] = df['Score_FINDRISK'].apply(get_findrisc_verdict)
     
     df['Status_Doctor_Done'] = True
     return df
