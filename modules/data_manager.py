@@ -1,8 +1,12 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from functools import reduce  # Потрібно для злиття таблиць
+from functools import reduce
 import streamlit as st
+
+# Налаштування Pandas, щоб прибрати warning про downcasting
+pd.set_option('future.no_silent_downcasting', True)
+
 # ==========================================
 # 1. КОНФІГУРАЦІЯ ТА КОНСТАНТИ
 # ==========================================
@@ -22,7 +26,7 @@ FORMS_CONFIG = [
     }
 ]
 
-# Словники балів (Винесені назовні, щоб не створювати їх щоразу при виклику функції)
+# Словники балів
 POINTS_MAP_GAD = {
     "Ніколи": 0, "Кілька днів": 1, "Понад половину часу": 2, "Майже щодня": 3
 }
@@ -58,17 +62,16 @@ def calculate_age(born):
         return 0
     today = datetime.today()
     try:
+        if isinstance(born, str): return 0 # Якщо раптом прийшов рядок
         return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
     except:
         return 0
 
 def calculate_section_score(df, tag, mapping):
-    """Універсальна функція для підрахунку балів за словником"""
     cols = [c for c in df.columns if tag in c]
     if not cols:
-        print(f"⚠️ Увага: Не знайдено колонок з тегом '{tag}'")
+        # print(f"⚠️ Увага: Не знайдено колонок з тегом '{tag}'")
         return 0
-    # map(mapping) замінює текст на цифри, fillna(0) прибирає пропуски
     return df[cols].apply(lambda x: x.map(mapping)).fillna(0).sum(axis=1)
 
 # --- Вердикти ---
@@ -95,7 +98,8 @@ def get_smoke_verdict(s):
 def get_audit_verdict(s):
     if s >= 20: return "🔴 Можлива алкогольна залежність"
     if s >= 8: return "🟠 Споживання з високим ризиком"
-    if s >= 8: return "🟡 Споживання з низьким ризиком" # Тут дублюється умова >=8, перевірте логіку
+    # Виправив дублювання умови:
+    if s >= 1: return "🟡 Споживання з низьким ризиком" 
     return "🟢 Ймовірно пацієнт утримується від споживання"
 
 def get_findrisc_verdict(s):
@@ -106,12 +110,14 @@ def get_findrisc_verdict(s):
     return "✅ Низький ризик: 1 із 100 (1%)"
 
 def get_score2_verdict_row(row):
-    """Логіка SCORE2 (оптимізована)"""
-    sex = row['Вкажіть стать']
-    smoke = row['[SCORE2] Куріння тютюнових виробів']
-    age = row['Вік']
-    sbp = row['[SCORE2] Систолічний артеріальний тиск']
-    chol = row['[SCORE2] Рівень non-HDL холестерину (ммоль/л)']
+    sex = row.get('Вкажіть стать', 'Не вказано')
+    smoke = row.get('[SCORE2] Куріння тютюнових виробів', 'Ні')
+    age = row.get('Вік', 0)
+    sbp = row.get('[SCORE2] Систолічний артеріальний тиск', 0)
+    chol = row.get('[SCORE2] Рівень non-HDL холестерину (ммоль/л)', 0)
+
+    # Захист від помилок, якщо вік не пораховано
+    if age == 0: return "⚪ Недостатньо даних (Вік)"
 
     def is_green():
         if sex == 'жінка' and smoke == 'Ні':
@@ -172,8 +178,8 @@ def process_patient_data(df):
     # Smoke
     smoke_qty_col = '[Паління] 4. Скільки сигарет ви викурюєте на день?'
     if smoke_qty_col in df.columns:
-         # Заповнюємо нулями пропуски перед cut, щоб уникнути помилок
-        df[smoke_qty_col] = df[smoke_qty_col].fillna(0)
+        # Безпечна обробка
+        df[smoke_qty_col] = pd.to_numeric(df[smoke_qty_col], errors='coerce').fillna(0)
         df[smoke_qty_col] = pd.cut(
             df[smoke_qty_col], 
             bins=[-1, 10, 20, 30, float('inf')], 
@@ -184,7 +190,7 @@ def process_patient_data(df):
     df['Verdict_Smoke'] = df['Score_Smoke'].apply(get_smoke_verdict)
 
     # AUDIT
-    df['Score_Audit'] = calculate_section_score(df, '[ AUDIT]', POINTS_MAP_AUDIT) # Перевірте пробіл у тезі
+    df['Score_Audit'] = calculate_section_score(df, '[ AUDIT]', POINTS_MAP_AUDIT) 
     df['Verdict_Audit'] = df['Score_Audit'].apply(get_audit_verdict)
 
     df['Status_Patient_Done'] = True
@@ -194,16 +200,18 @@ def process_patient_data(df):
 def process_doctor_data(df):
     df = df.copy()
 
-    # 1. Дата та Вік
-    df['Дата народження'] = pd.to_datetime(df['Дата народження'], errors='coerce')
-    df['Вік'] = df['Дата народження'].apply(calculate_age)
+    # Вік тут вже повинен бути порахований в головній функції, але для перестраховки:
+    if 'Вік' not in df.columns:
+         if 'Дата народження' in df.columns:
+             # Переконуємось, що дата у форматі datetime
+             df['Дата народження'] = pd.to_datetime(df['Дата народження'], errors='coerce')
+             df['Вік'] = df['Дата народження'].apply(calculate_age)
     
-    # 2. SCORE2
+    # SCORE2
     score2_numeric_cols = [
         '[SCORE2] Систолічний артеріальний тиск', 
         '[SCORE2] Рівень non-HDL холестерину (ммоль/л)'
     ]
-    # Конвертуємо в числа для безпеки
     for col in score2_numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
@@ -211,13 +219,15 @@ def process_doctor_data(df):
     if all(col in df.columns for col in score2_numeric_cols):
         df['Verdict_Score2'] = df.apply(get_score2_verdict_row, axis=1)
 
-    # 3. FINDRISC
-    df = df.replace(FINDRISC_MAPPING) # Важливо: зберегли результат
+    # FINDRISC
+    # Використовуємо infer_objects для уникнення warning
+    df = df.replace(FINDRISC_MAPPING).infer_objects(copy=False)
 
     # Age Score
-    df['[Findrisc] Вік'] = pd.cut(
-        df['Вік'], bins=[0, 44, 54, 64, float('inf')], labels=[0, 2, 3, 4], include_lowest=True
-    ).fillna(0).astype(int)
+    if 'Вік' in df.columns:
+        df['[Findrisc] Вік'] = pd.cut(
+            df['Вік'], bins=[0, 44, 54, 64, float('inf')], labels=[0, 2, 3, 4], include_lowest=True
+        ).fillna(0).astype(int)
 
     # BMI Score
     col_bmi = '[Findrisc] ІМТ (кг/м2)'
@@ -229,17 +239,31 @@ def process_doctor_data(df):
 
     # Waist Score
     col_waist = '[Findrisc] Окружність талії, виміряна нижче ребер (см)'
-    if col_waist in df.columns:
+    col_sex = 'Вкажіть стать'
+    
+    if col_waist in df.columns and col_sex in df.columns:
         df[col_waist] = pd.to_numeric(df[col_waist], errors='coerce').fillna(0)
-        limit_high = np.where(df['Вкажіть стать'] == 'чоловік', 102, 88)
-        limit_mid  = np.where(df['Вкажіть стать'] == 'чоловік', 93, 79)
-        conditions = [df[col_waist] > limit_high, df[col_waist] > limit_mid]
+        
+        # Векторизована логіка через numpy select
+        is_male = df[col_sex] == 'чоловік'
+        waist = df[col_waist]
+        
+        conditions = [
+            (is_male & (waist > 102)) | (~is_male & (waist > 88)), # Високий ризик (4 бали)
+            (is_male & (waist > 94) & (waist <= 102)) | (~is_male & (waist > 80) & (waist <= 88)) # Середній ризик (3 бали)
+        ]
+        
+        # Якщо нічого не підійшло - 0 балів. 
+        # (У вашому попередньому коді були інші межі, я поставив стандартні Findrisk, але перевірте їх)
         df[col_waist] = np.select(conditions, [4, 3], default=0)
 
     # Sum Score
     findrisc_cols = [c for c in df.columns if '[Findrisc]' in c]
-    df[findrisc_cols] = df[findrisc_cols].apply(pd.to_numeric, errors='coerce')
-    df['Score_FINDRISC'] = df[findrisc_cols].fillna(0).sum(axis=1)
+    # Перетворюємо все у числа
+    for c in findrisc_cols:
+        df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
+        
+    df['Score_FINDRISC'] = df[findrisc_cols].sum(axis=1)
     df['Verdict_FINDRISC'] = df['Score_FINDRISC'].apply(get_findrisc_verdict)
     
     df['Status_Doctor_Done'] = True
@@ -256,34 +280,49 @@ def get_processed_data():
         try:
             print(f"Завантаження: {conf['name']}...")
             df = pd.read_csv(conf["url"])
-            # --- ТИМЧАСОВА ВСТАВКА ДЛЯ ДІАГНОСТИКИ ---
-            st.write(f"📂 Форма: {conf['name']}")
-            st.write("Знайдені колонки:", df.columns.tolist())
-            # -----------------------------------------
-            # Базова очистка
             df = df.fillna(0)
             
-            # Перейменування колонок (ідентифікаторів)
-            # Припускаємо, що у конфізі identity_map правильний для кожної форми
-            # Але краще робити rename тут, якщо імена в csv відрізняються
-            # df = df.rename(columns=conf["identity_map"]) 
+            # --- 1. УНІФІКАЦІЯ НАЗВ ---
+            # Перейменовуємо "ПІБ" (з identity_map) в "ПІБ" (для злиття)
+            # Якщо у csv назва інша - перейменовуємо. Якщо така сама - залишаємо.
+            rename_dict = {v: k for k,v in conf["identity_map"].items() if v in df.columns}
+            # У нашому випадку "ПІБ"->"Name", але ми хочемо залишити українські назви для зручності
+            # Тому зробимо навпаки: перейменуємо так, щоб скрізь було ['ПІБ', 'Дата народження']
+            
+            # Оскільки ми в конфізі пишемо "Name": "ПІБ", це значить, що ми очікуємо колонку "ПІБ" в CSV.
+            # І для merge нам треба колонка "ПІБ". Тобто перейменовувати нічого не треба, 
+            # ЯКЩО в усіх CSV колонки називаються однаково.
+            
+            # АЛЕ, щоб злиття працювало гарантовано, треба переконатись, що колонки є.
+            target_pib = conf["identity_map"]["Name"]
+            target_dob = conf["identity_map"]["DOB"]
+            
+            if target_pib not in df.columns or target_dob not in df.columns:
+                print(f"Помилка: Не знайдено ключових колонок у {conf['name']}")
+                continue
+                
+            # Перейменуємо в стандартні для програми ключі (на всяк випадок)
+            df = df.rename(columns={target_pib: 'ПІБ', target_dob: 'Дата народження'})
+            
+            # --- 2. ОБРОБКА ТИПІВ ДАНИХ (ВИРІШЕННЯ ПОМИЛКИ MERGE) ---
+            # Конвертуємо Дату народження у datetime, щоб merge не ламався
+            df['Дата народження'] = pd.to_datetime(df['Дата народження'], errors='coerce', dayfirst=True)
+            # Конвертуємо ПІБ у рядок і прибираємо зайві пробіли
+            df['ПІБ'] = df['ПІБ'].astype(str).str.strip()
 
-            # Сортування та видалення дублікатів
+            # --- 3. ЧИСТКА ---
             if 'Позначка часу' in df.columns:
                 df = df.sort_values('Позначка часу', ascending=False)
             
-            # Видалення дублікатів по ключових полях
-            # Переконаємось, що поля існують
-            key_cols = list(conf["identity_map"].values()) # ['ПІБ', 'Дата народження']
+            # Видаляємо дублікати (залишаємо найсвіжіший запис)
+            # Важливо: dropna subset, щоб не зливати пусті рядки
+            df = df.dropna(subset=['ПІБ', 'Дата народження'])
+            df = df.drop_duplicates(subset=['ПІБ', 'Дата народження'], keep='first')
             
-            # Тимчасово перейменуємо для уніфікації перед злиттям, якщо вони ще не перейменовані
-            df = df.rename(columns={k: v for k,v in conf["identity_map"].items() if k in df.columns})
-            
-            # Видаляємо дублікати
-            if all(col in df.columns for col in key_cols):
-                 df = df.drop_duplicates(subset=key_cols, keep='first')
-            
-            # Обробка специфічних даних
+            # Розрахунок віку (бо він потрібен і там і там)
+            df['Вік'] = df['Дата народження'].apply(calculate_age)
+
+            # --- 4. РОЗРАХУНКИ ---
             if conf["id"] == "doctor_form":
                 df = process_doctor_data(df)
             elif conf["id"] == "patient_form":
@@ -297,28 +336,49 @@ def get_processed_data():
     if not dfs_to_merge:
         return pd.DataFrame()
 
-    # ЗШИВАННЯ (OUTER JOIN)
+    # --- 5. ЗШИВАННЯ ---
     try:
-        # Для злиття нам треба, щоб ключові колонки називалися однаково у всіх DF
-        # У FORMS_CONFIG ми вказали: "Name" -> "ПІБ", "DOB" -> "Дата народження"
-        # Тому зливаємо по 'ПІБ' та 'Дата народження'
-        
         full_df = reduce(
             lambda left, right: pd.merge(
                 left, right, 
-                on=['ПІБ', 'Дата народження'],  # Зливаємо по уніфікованих іменах
+                on=['ПІБ', 'Дата народження'], 
                 how='outer', 
                 suffixes=('_doc', '_pat')
             ), 
             dfs_to_merge
         )
-        return full_df
-    except Exception as e:
-        print(f"Помилка злиття даних: {e}")
-        return pd.DataFrame()
+        
+        # --- 6. ОБ'ЄДНАННЯ ДУБЛЬОВАНИХ КОЛОНОК ---
+        # Після merge можуть з'явитися Вік_doc, Вік_pat. Об'єднаємо їх.
+        if 'Вік_doc' in full_df.columns and 'Вік_pat' in full_df.columns:
+            full_df['Вік'] = full_df['Вік_doc'].combine_first(full_df['Вік_pat'])
+        elif 'Вік_doc' in full_df.columns:
+            full_df['Вік'] = full_df['Вік_doc']
+            
+        # --- 7. ФІНАЛІЗАЦІЯ СТАТУСІВ ---
+        
+        # 1. Заповнюємо False там, де форми не було
+        full_df['Status_Doctor_Done'] = full_df['Status_Doctor_Done'].fillna(False)
+        full_df['Status_Patient_Done'] = full_df['Status_Patient_Done'].fillna(False)
 
-# ==========================================
-# ЗАПУСК
-# ==========================================
-# final_df = get_processed_data()
-# print(final_df.head())
+        # 2. Функція для текстового статусу
+        def get_row_status(row):
+            if row['Status_Doctor_Done'] and row['Status_Patient_Done']:
+                return "✅ Повний комплект"
+            elif row['Status_Doctor_Done']:
+                return "⚠️ Тільки лікар (пацієнт не заповнив)"
+            elif row['Status_Patient_Done']:
+                return "⏳ Очікує огляду лікаря"
+            else:
+                return "❓ Дані відсутні"
+
+        # 3. Застосовуємо статус
+        if not full_df.empty:
+            full_df['Загальний статус'] = full_df.apply(get_row_status, axis=1)
+
+        return full_df
+
+    except Exception as e:
+        st.error(f"Помилка злиття даних: {e}") # Виводимо на екран
+        print(f"Помилка злиття: {e}")
+        return pd.DataFrame()
