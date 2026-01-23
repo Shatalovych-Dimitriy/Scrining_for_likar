@@ -1,130 +1,177 @@
 import streamlit as st
 import pandas as pd
 import base64
-from modules import printer_rez  # Імпорт нашого генератора PDF
+from modules import pdf_gen  # Ваш модуль генерації PDF
+
+# === КОНФІГУРАЦІЯ ВІДОБРАЖЕННЯ ===
+# tag: частина назви колонки після "Verdict_" або "Score_"
+# name: Заголовок картки
+# has_score: Чи є у цього тесту числові бали (SCORE2 не має Score_Score2, тільки Verdict)
+TESTS_CONFIG = [
+    {"tag": "Score2",   "name": "🫀 SCORE-2 (Серцевий ризик)", "has_score": False},
+    {"tag": "FINDRISK", "name": "🍬 FINDRISK (Діабет)",       "has_score": True},
+    {"tag": "PHQ",      "name": "😞 PHQ-9 (Депресія)",        "has_score": True},
+    {"tag": "GAD",      "name": "😰 GAD-7 (Тривожність)",     "has_score": True},
+    {"tag": "Audit",    "name": "🍷 AUDIT (Алкоголь)",        "has_score": True},
+    {"tag": "Smoke",    "name": "🚬 Нікотинова залежність",   "has_score": True}
+]
 
 def show_dashboard(df):
     """
-    Головна функція відображення картки пацієнта.
-    Приймає DataFrame з усіма пацієнтами.
+    Головний екран картки пацієнта.
     """
-    
-    st.header("🗂 Електронна карта пацієнта")
+    st.header("🗂 Результати скринінгу")
 
-    # --- 1. ПОШУК ІДЕНТИФІКАТОРА (ПІБ або ID) ---
-    # Шукаємо колонку, яка містить ім'я (перевірте точну назву у вашій таблиці!)
-    possible_names = ['Name', 'ПІБ', 'Прізвище', 'Full Name', 'Username']
-    search_col = None
+    # --- 1. ПОШУК ПАЦІЄНТА (По ПІБ, а не Name) ---
+    search_col = 'ПІБ'
     
-    for col in possible_names:
-        if col in df.columns:
-            search_col = col
-            break
-            
-    if not search_col:
-        st.error(f"❌ Помилка: У таблиці не знайдено колонку з іменем. Доступні колонки: {list(df.columns)}")
+    if search_col not in df.columns:
+        st.error(f"Помилка: Відсутня колонка '{search_col}'. Перевірте data_manager.")
         return
 
-    # --- 2. ВИБІР ПАЦІЄНТА ---
-    # Отримуємо унікальні імена і сортуємо їх
-    patient_list = df[search_col].unique()
-    selected_patient = st.selectbox("🔍 Оберіть пацієнта:", sorted(patient_list.astype(str)))
+    # Сортуємо список пацієнтів
+    patient_list = sorted(df[search_col].unique().astype(str))
+    selected_patient = st.selectbox("🔍 Пошук пацієнта:", patient_list)
 
-    # --- 3. ПІДГОТОВКА ДАНИХ ПАЦІЄНТА ---
-    # Фільтруємо записи тільки цього пацієнта
-    history = df[df[search_col] == selected_patient].copy()
-    
-    # Сортуємо за датою (свіжі зверху), якщо є колонка часу
-    if 'Timestamp' in history.columns:
-        history['Timestamp'] = pd.to_datetime(history['Timestamp'])
-        history = history.sort_values(by='Timestamp', ascending=False)
-    
-    if history.empty:
-        st.warning("Даних про цього пацієнта не знайдено.")
-        return
+    # Отримуємо запис пацієнта
+    record = df[df[search_col] == selected_patient].iloc[0]
 
-    # Беремо найсвіжіший запис (останній скринінг)
-    last_record = history.iloc[0]
+    # --- 2. ІНФО-ПАНЕЛЬ ---
+    st.divider()
+    col1, col2, col3, col4 = st.columns(4)
     
-    # Витягуємо ключові метрики (використовуємо .get, щоб не було помилок, якщо колонки немає)
-    date_str = last_record['Timestamp'].strftime('%d.%m.%Y %H:%M') if 'Timestamp' in last_record else "—"
-    verdict = last_record.get('Verdict', 'Не розраховано')
-    score = last_record.get('Risk_Score', 0)
+    with col1:
+        st.caption("Пацієнт")
+        st.subheader(record['ПІБ'])
+    
+    with col2:
+        st.caption("Вік / Дата народження")
+        dob = record.get('Дата народження', '—')
+        if isinstance(dob, pd.Timestamp): 
+            dob = dob.strftime('%d.%m.%Y')
+        
+        age = int(record.get('Вік', 0))
+        st.subheader(f"{age} років")
+        st.text(f"({dob})")
+
+    with col3:
+        st.caption("Стать")
+        # Шукаємо колонку статі (вона може бути з різних форм, тому шукаємо схожу)
+        sex_col = next((c for c in record.index if 'стать' in c.lower()), None)
+        sex = record.get(sex_col, "Не вказано") if sex_col else "—"
+        st.subheader(sex)
+
+    with col4:
+        st.caption("Статус заповнення")
+        status = record.get('Загальний статус', 'Невідомо')
+        
+        if "Повний" in status:
+            st.success(status)
+        elif "Тільки лікар" in status:
+            st.warning(status)
+        elif "Очікує" in status:
+            st.info(status)
+        else:
+            st.error(status)
 
     st.divider()
 
-    # --- 4. ГОЛОВНИЙ ЕКРАН (Розділяємо на дві колонки) ---
-    # col_details - ліва частина (текст і таблиця)
-    # col_pdf - права частина (документ для друку)
-    col_details, col_pdf = st.columns([1, 1])
+    # --- 3. СІТКА РЕЗУЛЬТАТІВ (GRID LAYOUT) ---
+    st.subheader("📊 Показники здоров'я")
+    
+    cols = st.columns(3) # 3 колонки для карток
 
-    # === ЛІВА КОЛОНКА: Деталі ===
-    with col_details:
-        st.subheader(f"Результат від {date_str}")
+    for index, test in enumerate(TESTS_CONFIG):
+        current_col = cols[index % 3]
+        with current_col:
+            _draw_test_card(record, test)
+
+    st.divider()
+
+    # --- 4. ПДФ ТА ДРУК ---
+    _render_pdf_section(record, selected_patient)
+
+
+def _draw_test_card(record, test_conf):
+    """Малює одну картку тесту."""
+    tag = test_conf["tag"]
+    title = test_conf["name"]
+    has_score = test_conf["has_score"]
+
+    # Формуємо назви колонок, які згенерував data_manager
+    verdict_col = f"Verdict_{tag}"
+    score_col = f"Score_{tag}"
+
+    verdict = record.get(verdict_col)
+    
+    # Отримуємо бали тільки якщо вони передбачені тестом
+    score = record.get(score_col, 0) if has_score else None
+
+    # Контейнер картки
+    with st.container(border=True):
+        st.markdown(f"**{title}**")
         
-        # Відображаємо кольоровий вердикт
-        if "Високий" in str(verdict) or (isinstance(score, (int, float)) and score > 8):
-            st.error(f"### {verdict}\n**Сума балів ризику:** {score}")
-        elif "Середній" in str(verdict) or (isinstance(score, (int, float)) and score > 5):
-            st.warning(f"### {verdict}\n**Сума балів ризику:** {score}")
+        # Перевірка на пустоту (NaN або пустий рядок)
+        if pd.isna(verdict) or verdict == "" or verdict is None or verdict == 0:
+            st.markdown("⚪ *Не пройдено*")
         else:
-            st.success(f"### {verdict}\n**Сума балів ризику:** {score}")
-
-        st.markdown("#### 📋 Відповіді пацієнта:")
-        
-        # Чистимо дані для красивої таблиці
-        # Прибираємо технічні поля, щоб показати тільки питання-відповіді
-        tech_cols = ['Timestamp', 'Date', 'Risk_Score', 'Verdict', 'Name', 'Test_Type', search_col]
-        display_data = last_record.drop(labels=[c for c in tech_cols if c in last_record.index])
-        
-        # Транспонуємо (перевертаємо) для зручності читання
-        details_df = display_data.dropna().to_frame(name="Відповідь")
-        
-        # Виводимо таблицю
-        st.dataframe(details_df, use_container_width=True, height=500)
-
-    # === ПРАВА КОЛОНКА: PDF Попередній перегляд ===
-    with col_pdf:
-        st.subheader("📄 Друкована форма")
-        st.caption("Наведіть мишку на документ, щоб побачити кнопку друку (верхній правий кут).")
-
-        # 1. Готуємо дані для PDF (словник без технічних колонок)
-        clean_data_dict = display_data.to_dict()
-
-        # 2. Генеруємо PDF (викликаємо ваш модуль pdf_gen)
-        try:
-            pdf_bytes = pdf_gen.create_report(
-                patient_name=selected_patient,
-                date_str=date_str,
-                verdict=str(verdict),
-                score=score,
-                data_dict=clean_data_dict
-            )
-
-            # 3. Магія: Конвертуємо PDF у Base64 для відображення в браузері
-            base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-
-            # 4. Створюємо HTML iframe (вбудоване вікно)
-            # type="application/pdf" - це каже браузеру "включи свій PDF-рідер"
-            pdf_display = f'''
-                <iframe 
-                    src="data:application/pdf;base64,{base64_pdf}" 
-                    width="100%" 
-                    height="700px" 
-                    type="application/pdf"
-                    style="border: 1px solid #ccc; border-radius: 5px;">
-                </iframe>
-            '''
+            verdict_str = str(verdict)
             
-            # Рендеримо HTML
-            st.markdown(pdf_display, unsafe_allow_html=True)
+            # --- Логіка кольорів ---
+            # Червоний (тригери небезпеки)
+            if any(x in verdict_str for x in ["Тяжк", "Клінічн", "Високий", "Залежність", "🔴"]):
+                st.error(f"{verdict_str}")
+            # Помаранчевий/Жовтий (тригери уваги)
+            elif any(x in verdict_str for x in ["Помірн", "Середн", "Увага", "🟠", "🟡"]):
+                st.warning(f"{verdict_str}")
+            # Зелений (все ок)
+            else:
+                st.success(f"{verdict_str}")
+            
+            # Виводимо бали, якщо вони є
+            if has_score:
+                st.caption(f"Бали: {score}")
 
-        except Exception as e:
-            st.error(f"Не вдалося згенерувати PDF. Перевірте файл шрифту (Arial.ttf). Помилка: {e}")
 
-    # --- 5. ІСТОРІЯ (Знизу, якщо є старі записи) ---
-    if len(history) > 1:
-        st.divider()
-        with st.expander(f"📚 Архів попередніх скринінгів ({len(history)-1})"):
-            # Показуємо все, крім найпершого (поточного) запису
-            st.dataframe(history.iloc[1:], use_container_width=True)
+def _render_pdf_section(record, patient_name):
+    """Блок генерації PDF"""
+    st.subheader("📄 Друк результатів")
+    
+    # 1. Формуємо текстове резюме для шапки
+    summary_text = ""
+    for test in TESTS_CONFIG:
+        v = record.get(f"Verdict_{test['tag']}")
+        if pd.notna(v) and v != 0:
+            # Очищаємо смайлики для PDF (бо можуть не відобразитись)
+            clean_v = str(v).replace("🔴", "").replace("🟠", "").replace("🟡", "").replace("🟢", "").replace("✅", "").strip()
+            summary_text += f"• {test['name']}: {clean_v}\n"
+
+    # 2. Очищаємо дані для детальної таблиці (прибираємо технічні поля)
+    # Прибираємо всі колонки, які ми створили програмно (Score_, Verdict_, Status_...)
+    tech_keywords = ['Score_', 'Verdict_', 'Status_', 'Загальний статус', 'Вік']
+    tech_cols = [c for c in record.index if any(x in c for x in tech_keywords)]
+    
+    # Також можна прибрати ідентифікатори, бо вони вже в шапці
+    tech_cols.extend(['ПІБ', 'Дата народження', 'Позначка часу_doc', 'Позначка часу_pat'])
+    
+    print_data = record.drop(labels=tech_cols, errors='ignore').dropna()
+
+    try:
+        # Викликаємо генератор (переконайтесь, що pdf_gen.py існує)
+        pdf_bytes = pdf_gen.create_report(
+            patient_name=patient_name,
+            date_str=str(pd.Timestamp.now().strftime('%d.%m.%Y')),
+            verdict=summary_text, 
+            score="", # Загальний бал не потрібен, бо у нас резюме
+            data_dict=print_data.to_dict()
+        )
+
+        # Відображення
+        base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
+        st.markdown(pdf_display, unsafe_allow_html=True)
+        
+    except Exception as e:
+        st.warning("⚠️ Попередній перегляд PDF недоступний (перевірте наявність шрифтів).")
+        with st.expander("Показати сирі дані для друку"):
+            st.dataframe(print_data)
