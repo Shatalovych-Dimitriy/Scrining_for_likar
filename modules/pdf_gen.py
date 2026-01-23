@@ -3,12 +3,12 @@ import os
 
 class PDF(FPDF):
     def header(self):
-        # Можна додати логотип або назву клініки
+        # Простий заголовок на кожній сторінці
         try:
-            # Спробуємо встановити шрифт для шапки (якщо він вже зареєстрований)
-            self.set_font('CustomFont', 'B', 10)
+            self.set_font('CustomFont', 'I', 8)
+            self.set_text_color(128, 128, 128) # Сірий колір
             self.cell(0, 10, 'HealthScreening System Report', 0, 1, 'R')
-            self.ln(5)
+            self.ln(2)
         except:
             pass
 
@@ -16,115 +16,165 @@ class PDF(FPDF):
         self.set_y(-15)
         try:
             self.set_font('CustomFont', 'I', 8)
+            self.set_text_color(128, 128, 128)
             self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
         except:
             pass
 
 def create_report(patient_name, date_str, verdict, score, data_dict):
     """
-    Генерує PDF з підтримкою кирилиці.
-    Важливо: файл шрифту (напр. Arial.ttf) має бути в корені проекту.
+    Генерує стильний PDF з підтримкою кирилиці.
     """
     pdf = PDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # === 1. РЕЄСТРАЦІЯ ШРИФТУ (КРИТИЧНО ВАЖЛИВО) ===
-    # Вибираємо шрифт. Краще покласти 'Arial.ttf' або 'DejaVuSans.ttf' у папку проекту
+    # === 1. НАЛАШТУВАННЯ ШРИФТУ ===
     font_path = 'Arial.ttf' 
-    
-    # Якщо Arial немає, спробуємо DejaVu (часто є на Linux серверах)
     if not os.path.exists(font_path):
-        font_path = 'DejaVuSans.ttf'
+        font_path = 'DejaVuSans.ttf' # Запасний варіант
 
     if not os.path.exists(font_path):
-        # Якщо шрифту немає взагалі - повертаємо помилку, бо кирилиця не спрацює
-        return b"ERROR: Font file (Arial.ttf) not found. Please upload it to the project folder."
+        return b"ERROR: Font file (Arial.ttf) not found."
 
-    # uni=True вмикає підтримку Unicode (української мови)
+    # Реєструємо шрифти
     pdf.add_font('CustomFont', '', font_path, uni=True)
-    pdf.add_font('CustomFont', 'B', font_path, uni=True) # Реєструємо жирний (хоча це той самий файл, FPDF зробить емуляцію)
+    pdf.add_font('CustomFont', 'B', font_path, uni=True)
+    pdf.add_font('CustomFont', 'I', font_path, uni=True)
     
-    # === 2. ЗАГОЛОВОК ===
-    pdf.set_font('CustomFont', 'B', 16)
-    pdf.cell(0, 10, f"Результати скринінгу: {patient_name}", 0, 1, 'C')
+    # === 2. ШАПКА ЗВІТУ (БЛОК ПАЦІЄНТА) ===
+    # Малюємо сіру плашку
+    pdf.set_fill_color(245, 245, 245) # Дуже світлий сірий
+    pdf.rect(10, 20, 190, 30, 'F') # Координати та розмір фону
     
-    pdf.set_font('CustomFont', '', 10)
-    pdf.cell(0, 10, f"Дата формування: {date_str}", 0, 1, 'C')
-    pdf.ln(5)
+    # Текст шапки
+    pdf.set_y(25)
+    pdf.set_font('CustomFont', 'B', 18)
+    pdf.set_text_color(44, 62, 80) # Темно-синій
+    pdf.cell(0, 10, f"Медичний звіт пацієнта", 0, 1, 'C')
+    
+    pdf.set_font('CustomFont', '', 12)
+    pdf.set_text_color(0, 0, 0)
+    pdf.cell(0, 8, f"ПІБ: {patient_name}  |  Дата: {date_str}", 0, 1, 'C')
+    
+    pdf.ln(15) # Відступ після шапки
 
-    # === 3. КОРОТКЕ РЕЗЮМЕ (ВЕРДИКТИ) ===
-    pdf.set_fill_color(240, 240, 240) # Сірий фон
-    pdf.set_font('CustomFont', 'B', 12)
-    pdf.cell(0, 10, "Загальні висновки", 0, 1, 'L', fill=True)
+    # === 3. КОРОТКЕ РЕЗЮМЕ ===
+    pdf.set_font('CustomFont', 'B', 14)
+    pdf.set_text_color(44, 62, 80)
+    pdf.cell(0, 10, "Зведення результатів", 0, 1, 'L')
+    
+    # Чорна лінія під заголовком
+    pdf.set_line_width(0.5)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y()) 
+    pdf.ln(2)
     
     pdf.set_font('CustomFont', '', 11)
-    # verdict - це багаторядковий текст, який ми сформували в patient_view
-    pdf.multi_cell(0, 7, verdict)
-    pdf.ln(5)
+    pdf.set_text_color(50, 50, 50)
+    # verdict - це текст, який ми передали. Він може бути довгим.
+    pdf.multi_cell(0, 6, verdict)
+    pdf.ln(10)
 
-    # === 4. ДЕТАЛЬНА ТАБЛИЦЯ (ПИТАННЯ-ВІДПОВІДІ) ===
-    pdf.set_font('CustomFont', 'B', 12)
-    pdf.cell(0, 10, "Деталі анкетування", 0, 1, 'L', fill=True)
-    pdf.ln(2)
+    # === 4. ДЕТАЛІЗАЦІЯ (ТАБЛИЦЯ) ===
+    
+    # Прапор для "зебри" (чергування кольорів рядків)
+    fill_row = False 
 
-    pdf.set_font('CustomFont', '', 10)
-
-    # Проходимо по словнику даних
     for key, value in data_dict.items():
-        # Очистка тексту від зайвих символів, які можуть зламати PDF
         safe_key = str(key).strip()
         safe_val = str(value).strip()
 
-        # Якщо це заголовок секції (починається з ===)
+        # --- ВАРІАНТ А: ЦЕ ЗАГОЛОВОК СЕКЦІЇ (=== TEST ===) ---
         if safe_key.startswith("==="):
-            pdf.ln(3)
-            pdf.set_font('CustomFont', 'B', 11) # Жирний для заголовка тесту
-            # Заголовок секції малюємо на всю ширину
-            # Використовуємо multi_cell, щоб не вилізло за межі
-            pdf.multi_cell(0, 8, f"{safe_key}  {safe_val}", border='B')
-            pdf.set_font('CustomFont', '', 10) # Повертаємо звичайний шрифт
-        
-        # Якщо це звичайне питання
-        else:
-            if safe_key == "   ": # Пустий розділювач
-                pdf.ln(2)
-                continue
-                
-            # Малюємо питання (зліва) і відповідь (справа)
-            # Розрахунок висоти рядка, щоб текст не накладався
+            pdf.ln(5) # Відступ перед новим блоком
             
-            # Ширина для питання (65%) і відповіді (35%)
-            w_question = 130
-            w_answer = 60
+            # Парсимо рядок, щоб прибрати "===" і дістати красиву назву
+            # Приклад: "=== PHQ-9 === ВИСНОВОК: Тяжка депресія"
+            # Розділимо на Назву тесту і Висновок
+            clean_title = safe_key.replace("===", "").strip()
             
-            # Зберігаємо поточну позицію
-            x_start = pdf.get_x()
-            y_start = pdf.get_y()
+            # Малюємо темну плашку для заголовка тесту
+            pdf.set_fill_color(44, 62, 80) # Темний колір
+            pdf.set_text_color(255, 255, 255) # Білий текст
+            pdf.set_font('CustomFont', 'B', 12)
             
-            # Друкуємо питання (MultiCell дозволяє перенос слів)
-            pdf.multi_cell(w_question, 6, safe_key, border='B')
+            # Малюємо на всю ширину
+            pdf.cell(0, 10, f"  {clean_title}", 0, 1, 'L', fill=True)
             
-            # Визначаємо, де закінчилося питання
-            y_end = pdf.get_y()
-            height = y_end - y_start
+            # Виводимо сам висновок під заголовком (якщо він є у значенні)
+            if safe_val:
+                pdf.set_fill_color(230, 230, 230) # Світло-сірий підзаголовок
+                pdf.set_text_color(0, 0, 0) # Чорний текст
+                pdf.set_font('CustomFont', 'B', 11)
+                pdf.multi_cell(0, 8, f"  {safe_val}", fill=True)
             
-            # Переміщуємося вправо для друку відповіді
-            pdf.set_xy(x_start + w_question, y_start)
-            
-            # Друкуємо відповідь (жирнішим, щоб виділялася)
-            pdf.set_font('CustomFont', 'B', 10)
-            
-            # Відповідь теж може бути довгою, тому MultiCell
-            # Але нам треба, щоб висота комірки відповіді співпадала з висотою питання
-            # Хоча FPDF 1.7 це складно робить, тому просто друкуємо
-            pdf.multi_cell(w_answer, 6, safe_val, border='B')
-            
-            # Повертаємо курсор на початок наступного рядка (під найнижчу комірку)
-            y_final = pdf.get_y()
-            if y_final < y_end: # Якщо питання зайняло більше місця, ніж відповідь
-                pdf.set_y(y_end)
-            
-            pdf.set_font('CustomFont', '', 10) # Скидаємо жирність
+            # Скидаємо кольори для питань
+            pdf.set_text_color(0, 0, 0)
+            fill_row = False # Скидаємо зебру
+            continue
 
-    # Повертаємо байти PDF файлу
-    return pdf.output(dest='S').encode('latin-1') # Trick: FPDF output returns latin-1 string representing bytes, we encode it back to bytes
+        # --- ВАРІАНТ Б: ПУСТИЙ РОЗДІЛЮВАЧ ---
+        if safe_key == "   ":
+            pdf.ln(2)
+            continue
+
+        # --- ВАРІАНТ В: ПИТАННЯ ТА ВІДПОВІДЬ ---
+        # Налаштовуємо колір фону для "зебри"
+        if fill_row:
+            pdf.set_fill_color(245, 245, 245) # Дуже світлий
+        else:
+            pdf.set_fill_color(255, 255, 255) # Білий
+
+        # Ширина колонок
+        w_question = 140
+        w_answer = 50
+        
+        # Перевірка на розрив сторінки
+        if pdf.get_y() > 270:
+            pdf.add_page()
+        
+        # Друкуємо рядок
+        # Оскільки MultiCell складний для таблиць, зробимо хитрість:
+        # Питання зліва, Відповідь справа.
+        
+        pdf.set_font('CustomFont', '', 10)
+        
+        # Зберігаємо позицію Y
+        y_start = pdf.get_y()
+        
+        # Питання (MultiCell, бо може бути довгим)
+        # border=0, fill=True (щоб спрацювала зебра)
+        pdf.multi_cell(w_question, 6, f"  {safe_key}", border='L', align='L', fill=True)
+        
+        # Де закінчилось питання?
+        y_end_q = pdf.get_y()
+        
+        # Повертаємось наверх і вправо для відповіді
+        pdf.set_xy(10 + w_question, y_start)
+        
+        # Відповідь (Жирним)
+        pdf.set_font('CustomFont', 'B', 10)
+        # Щоб фон відповіді мав таку ж висоту, як питання, треба знати висоту.
+        # FPDF це робит складно. 
+        # Простий варіант: малюємо відповідь теж MultiCell
+        
+        # Обчислюємо висоту блоку питання
+        h_block = y_end_q - y_start
+        
+        # Якщо питання зайняло 1 рядок (6 мм), а відповідь довга - треба розтягнути.
+        # Але зазвичай відповідь коротка ("Так", "Ні").
+        # Тому просто малюємо відповідь.
+        
+        pdf.multi_cell(w_answer, h_block, safe_val, border='R', align='C', fill=True)
+        
+        # Переміщуємо курсор під найнижчий елемент
+        pdf.set_y(y_end_q)
+        
+        # Малюємо нижню лінію (світлу)
+        pdf.set_draw_color(220, 220, 220)
+        pdf.line(10, y_end_q, 200, y_end_q)
+        
+        # Перемикаємо зебру
+        fill_row = not fill_row
+
+    return pdf.output(dest='S').encode('latin-1')
