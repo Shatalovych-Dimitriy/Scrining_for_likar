@@ -3,63 +3,128 @@ import os
 
 class PDF(FPDF):
     def header(self):
-        # Логотип або назва клініки
-        self.set_font('Arial', 'B', 16)
-        self.cell(0, 10, 'Медичний Портал: Результати Скринінгу', 0, 1, 'C')
-        self.ln(10)
+        # Можна додати логотип або назву клініки
+        try:
+            # Спробуємо встановити шрифт для шапки (якщо він вже зареєстрований)
+            self.set_font('CustomFont', 'B', 10)
+            self.cell(0, 10, 'HealthScreening System Report', 0, 1, 'R')
+            self.ln(5)
+        except:
+            pass
+
+    def footer(self):
+        self.set_y(-15)
+        try:
+            self.set_font('CustomFont', 'I', 8)
+            self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+        except:
+            pass
 
 def create_report(patient_name, date_str, verdict, score, data_dict):
-    # Створюємо PDF об'єкт
+    """
+    Генерує PDF з підтримкою кирилиці.
+    Важливо: файл шрифту (напр. Arial.ttf) має бути в корені проекту.
+    """
     pdf = PDF()
     pdf.add_page()
-    
-    # --- ВАЖЛИВО: Підключення кириличного шрифту ---
-    # Переконайтеся, що файл 'Arial.ttf' лежить поруч зі скриптом!
-    # Якщо його немає, код впаде з помилкою.
-    try:
-        pdf.add_font('Arial', '', 'Arial.ttf', uni=True)
-        pdf.add_font('Arial', 'B', 'Arial.ttf', uni=True)
-        pdf.set_font('Arial', '', 12)
-    except:
-        # План Б, якщо шрифту немає (будуть кракозябри, але код не впаде)
-        print("⚠️ УВАГА: Файл шрифту Arial.ttf не знайдено!")
-        pdf.set_font('Helvetica', '', 12)
 
-    # 1. Інформація про пацієнта
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, f"Пацієнт: {patient_name}", 0, 1)
-    pdf.cell(0, 10, f"Дата обстеження: {date_str}", 0, 1)
+    # === 1. РЕЄСТРАЦІЯ ШРИФТУ (КРИТИЧНО ВАЖЛИВО) ===
+    # Вибираємо шрифт. Краще покласти 'Arial.ttf' або 'DejaVuSans.ttf' у папку проекту
+    font_path = 'Arial.ttf' 
+    
+    # Якщо Arial немає, спробуємо DejaVu (часто є на Linux серверах)
+    if not os.path.exists(font_path):
+        font_path = 'DejaVuSans.ttf'
+
+    if not os.path.exists(font_path):
+        # Якщо шрифту немає взагалі - повертаємо помилку, бо кирилиця не спрацює
+        return b"ERROR: Font file (Arial.ttf) not found. Please upload it to the project folder."
+
+    # uni=True вмикає підтримку Unicode (української мови)
+    pdf.add_font('CustomFont', '', font_path, uni=True)
+    pdf.add_font('CustomFont', 'B', font_path, uni=True) # Реєструємо жирний (хоча це той самий файл, FPDF зробить емуляцію)
+    
+    # === 2. ЗАГОЛОВОК ===
+    pdf.set_font('CustomFont', 'B', 16)
+    pdf.cell(0, 10, f"Результати скринінгу: {patient_name}", 0, 1, 'C')
+    
+    pdf.set_font('CustomFont', '', 10)
+    pdf.cell(0, 10, f"Дата формування: {date_str}", 0, 1, 'C')
     pdf.ln(5)
 
-    # 2. Вердикт (Результат)
-    pdf.set_font('Arial', 'B', 14)
-    # Змінюємо колір тексту залежно від результату (просто для краси, ч/б принтер надрукує сірим)
-    if "Високий" in verdict:
-        pdf.set_text_color(200, 0, 0) # Червоний
-    else:
-        pdf.set_text_color(0, 100, 0) # Зелений
-        
-    pdf.cell(0, 10, f"Висновок: {verdict} ({score} балів)", 0, 1)
-    pdf.set_text_color(0, 0, 0) # Повертаємо чорний колір
-    pdf.ln(10)
-
-    # 3. Таблиця відповідей
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, "Детальні відповіді:", 0, 1)
+    # === 3. КОРОТКЕ РЕЗЮМЕ (ВЕРДИКТИ) ===
+    pdf.set_fill_color(240, 240, 240) # Сірий фон
+    pdf.set_font('CustomFont', 'B', 12)
+    pdf.cell(0, 10, "Загальні висновки", 0, 1, 'L', fill=True)
     
-    pdf.set_font('Arial', '', 10)
-    
-    # Проходимося по всіх питаннях
-    for question, answer in data_dict.items():
-        # question - це питання, answer - відповідь
-        # Використовуємо multi_cell, щоб довгий текст переносився на новий рядок
-        pdf.set_font('Arial', 'B', 10)
-        pdf.multi_cell(0, 6, f"Питання: {str(question)}")
-        
-        pdf.set_font('Arial', '', 10)
-        pdf.multi_cell(0, 6, f"Відповідь: {str(answer)}")
-        pdf.ln(2) # Відступ між питаннями
+    pdf.set_font('CustomFont', '', 11)
+    # verdict - це багаторядковий текст, який ми сформували в patient_view
+    pdf.multi_cell(0, 7, verdict)
+    pdf.ln(5)
 
-    # Повертаємо готовий файл як байти (рядок)
-    return pdf.output(dest='S').encode('latin-1') 
-    # encode('latin-1') потрібен для fpdf версії 1.7.x, якщо у вас fpdf2 - це може бути не треба
+    # === 4. ДЕТАЛЬНА ТАБЛИЦЯ (ПИТАННЯ-ВІДПОВІДІ) ===
+    pdf.set_font('CustomFont', 'B', 12)
+    pdf.cell(0, 10, "Деталі анкетування", 0, 1, 'L', fill=True)
+    pdf.ln(2)
+
+    pdf.set_font('CustomFont', '', 10)
+
+    # Проходимо по словнику даних
+    for key, value in data_dict.items():
+        # Очистка тексту від зайвих символів, які можуть зламати PDF
+        safe_key = str(key).strip()
+        safe_val = str(value).strip()
+
+        # Якщо це заголовок секції (починається з ===)
+        if safe_key.startswith("==="):
+            pdf.ln(3)
+            pdf.set_font('CustomFont', 'B', 11) # Жирний для заголовка тесту
+            # Заголовок секції малюємо на всю ширину
+            # Використовуємо multi_cell, щоб не вилізло за межі
+            pdf.multi_cell(0, 8, f"{safe_key}  {safe_val}", border='B')
+            pdf.set_font('CustomFont', '', 10) # Повертаємо звичайний шрифт
+        
+        # Якщо це звичайне питання
+        else:
+            if safe_key == "   ": # Пустий розділювач
+                pdf.ln(2)
+                continue
+                
+            # Малюємо питання (зліва) і відповідь (справа)
+            # Розрахунок висоти рядка, щоб текст не накладався
+            
+            # Ширина для питання (65%) і відповіді (35%)
+            w_question = 130
+            w_answer = 60
+            
+            # Зберігаємо поточну позицію
+            x_start = pdf.get_x()
+            y_start = pdf.get_y()
+            
+            # Друкуємо питання (MultiCell дозволяє перенос слів)
+            pdf.multi_cell(w_question, 6, safe_key, border='B')
+            
+            # Визначаємо, де закінчилося питання
+            y_end = pdf.get_y()
+            height = y_end - y_start
+            
+            # Переміщуємося вправо для друку відповіді
+            pdf.set_xy(x_start + w_question, y_start)
+            
+            # Друкуємо відповідь (жирнішим, щоб виділялася)
+            pdf.set_font('CustomFont', 'B', 10)
+            
+            # Відповідь теж може бути довгою, тому MultiCell
+            # Але нам треба, щоб висота комірки відповіді співпадала з висотою питання
+            # Хоча FPDF 1.7 це складно робить, тому просто друкуємо
+            pdf.multi_cell(w_answer, 6, safe_val, border='B')
+            
+            # Повертаємо курсор на початок наступного рядка (під найнижчу комірку)
+            y_final = pdf.get_y()
+            if y_final < y_end: # Якщо питання зайняло більше місця, ніж відповідь
+                pdf.set_y(y_end)
+            
+            pdf.set_font('CustomFont', '', 10) # Скидаємо жирність
+
+    # Повертаємо байти PDF файлу
+    return pdf.output(dest='S').encode('latin-1') # Trick: FPDF output returns latin-1 string representing bytes, we encode it back to bytes
