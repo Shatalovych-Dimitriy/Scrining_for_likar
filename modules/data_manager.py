@@ -156,9 +156,9 @@ def get_score2_verdict_row(row):
                 if 70 <= age < 90: return not (sbp >= 120 or chol >= 5)
         return False
 
-    if is_green(): return "🟢"
-    elif is_yellow(): return "🟡"
-    else: return "🔴"
+    if is_green(): return "🟢 Зелений"
+    elif is_yellow(): return "🟡 Жовтий"
+    else: return "🔴 червоний"
 
 # ==========================================
 # 3. ФУНКЦІЇ ОБРОБКИ ДАНИХ
