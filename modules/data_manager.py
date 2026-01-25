@@ -10,17 +10,16 @@ pd.set_option('future.no_silent_downcasting', True)
 # ==========================================
 # 1. КОНФІГУРАЦІЯ ТА КОНСТАНТИ
 # ==========================================
-
 FORMS_CONFIG = [
     {   "id": "doctor_form",
         "name": "Лікар",
-        "url": "https://docs.google.com/spreadsheets/d/e/2PACX-1vR4Fkc0NoXeUR3pPuJXfJvf48jIrLPYeFiQyF7kWAT4W5ilsPddahcVjYpg15N-uJqbKzrps5nUPUiQ/pub?gid=584209057&single=true&output=csv",
+        "url": st.secrets["links"]["doktor_link"],
         "tags": ["Findrisc", "SCORE2"],
         "identity_map": {"Name": "ПІБ", "DOB": "Дата народження"}
     },
     {   "id": "patient_form",
         "name": "Пацієнт",
-        "url": "https://docs.google.com/spreadsheets/d/e/2PACX-1vSF_ZRq1NV9VwXR8PA9YPVCqIJ1MRwoZnA2Ec0Sz4CMMhU98dZIZU4BtIo4pH6oM7J4-E_VasWzCEqM/pub?gid=330455959&single=true&output=csv",
+        "url": st.secrets["links"]["patient_link"],
         "tags": ["PHQ", "GAD","Паління","AUDIT"],
         "identity_map": {"Name": "ПІБ", "DOB": "Дата народження"}
     }
