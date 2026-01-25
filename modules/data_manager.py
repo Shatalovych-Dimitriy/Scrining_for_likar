@@ -219,55 +219,79 @@ def process_doctor_data(df):
         df['Verdict_Score2'] = df.apply(get_score2_verdict_row, axis=1)
 
     # FINDRISC
-    # Використовуємо infer_objects для уникнення warning
-    df = df.replace(FINDRISC_MAPPING).infer_objects(copy=False)
+# === 3. FINDRISK (ВИПРАВЛЕНА ЛОГІКА) ===
+    # Створюємо колонку для суми балів
+    df['Score_FINDRISK'] = 0
+    
+    # А. Текстові питання (зі словника)
+    # Ми НЕ робимо df.replace(), щоб зберегти текст "Так/Ні" для друку!
+    for col_name, mapping in FINDRISC_MAPPING.items():
+        if col_name in df.columns:
+            # 1. Рахуємо бали в тимчасову серію
+            points = df[col_name].map(mapping).fillna(0)
+            # 2. Додаємо до загального рахунку
+            df['Score_FINDRISK'] += points
+            # 3. Оригінальну колонку df[col_name] НЕ ЧІПАЄМО!
 
-    # Age Score
+    # Б. Бали за вік
     if 'Вік' in df.columns:
-        df['[Findrisc] Вік'] = pd.cut(
-            df['Вік'], bins=[0, 44, 54, 64, float('inf')], labels=[0, 2, 3, 4], include_lowest=True
+        # Рахуємо бали окремо
+        age_points = pd.cut(
+            df['Вік'], 
+            bins=[0, 44, 54, 64, float('inf')], 
+            labels=[0, 2, 3, 4], 
+            include_lowest=True
         ).fillna(0).astype(int)
+        
+        # Додаємо до суми
+        df['Score_FINDRISK'] += age_points
+        
+        # Створюємо технічну колонку для PDF, щоб там було видно бали за вік? 
+        # Ні, краще залишити просто Вік. 
+        # Якщо хочете бачити "[Findrisc] Вік" у звіті, можна створити її копією
+        df['[Findrisc] Вік'] = df['Вік']
 
-    # BMI Score
+    # В. Бали за ІМТ
     col_bmi = '[Findrisc] ІМТ (кг/м2)'
     if col_bmi in df.columns:
-        df[col_bmi] = pd.to_numeric(df[col_bmi], errors='coerce')
-        df[col_bmi] = pd.cut(
-            df[col_bmi], bins=[0, 24, 30, float('inf')], labels=[0, 1, 3], include_lowest=True
+        # Перетворюємо на числа для розрахунку, але зберігаємо в тимчасову змінну
+        bmi_numeric = pd.to_numeric(df[col_bmi], errors='coerce')
+        
+        bmi_points = pd.cut(
+            bmi_numeric, 
+            bins=[0, 25, 30, float('inf')], 
+            labels=[0, 1, 3], 
+            include_lowest=True,
+            right=False # Важливо для точності меж
         ).fillna(0).astype(int)
+        
+        df['Score_FINDRISK'] += bmi_points
+        # Оригінальний col_bmi залишається як був (наприклад 28.5)
 
-    # Waist Score
+    # Г. Бали за Талію
     col_waist = '[Findrisc] Окружність талії, виміряна нижче ребер (см)'
     col_sex = 'Вкажіть стать'
     
     if col_waist in df.columns and col_sex in df.columns:
-        df[col_waist] = pd.to_numeric(df[col_waist], errors='coerce').fillna(0)
+        waist_numeric = pd.to_numeric(df[col_waist], errors='coerce').fillna(0)
         
-        # Векторизована логіка через numpy select
         is_male = df[col_sex] == 'чоловік'
-        waist = df[col_waist]
         
+        # Логіка нарахування балів (не змінюючи саму талію)
         conditions = [
-            (is_male & (waist > 102)) | (~is_male & (waist > 88)), # Високий ризик (4 бали)
-            (is_male & (waist > 94) & (waist <= 102)) | (~is_male & (waist > 80) & (waist <= 88)) # Середній ризик (3 бали)
+            (is_male & (waist_numeric > 102)) | (~is_male & (waist_numeric > 88)), # 4 бали
+            (is_male & (waist_numeric > 94)) | (~is_male & (waist_numeric > 80))   # 3 бали
         ]
         
-        # Якщо нічого не підійшло - 0 балів. 
-        # (У вашому попередньому коді були інші межі, я поставив стандартні Findrisk, але перевірте їх)
-        df[col_waist] = np.select(conditions, [4, 3], default=0)
+        waist_points = np.select(conditions, [4, 3], default=0)
+        df['Score_FINDRISK'] += waist_points
 
-
-    findrisc_cols = [c for c in df.columns if '[Findrisc]' in c]
-    # Перетворюємо все у числа
-    for c in findrisc_cols:
-        df[c] = pd.to_numeric(df[c], errors='coerce').fillna(0)
-        
-    # === ВИПРАВЛЕННЯ ТУТ: міняємо 'FINDRISC' (C) на 'FINDRISK' (K) ===
-    df['Score_FINDRISK'] = df[findrisc_cols].sum(axis=1)
+    # Фінальний вердикт
     df['Verdict_FINDRISK'] = df['Score_FINDRISK'].apply(get_findrisc_verdict)
     
     df['Status_Doctor_Done'] = True
-    return df
+    return df    
+
 
 # ==========================================
 # 4. ГОЛОВНИЙ МЕРДЖЕР (ОБ'ЄДНУВАЧ)
