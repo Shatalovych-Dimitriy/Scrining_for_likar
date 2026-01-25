@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 # 1. Посилання на CSV файл з логінами (Вкладка Users)
-USERS_URL = "https://docs.google.com/spreadsheets/d/16Rv97vtbKA_RrPLGzUeCoeDaF5A25YPbTuVMNJgVXks/export?format=csv"
+USERS_URL = st.secrets["links"]["autorize_likar"]
 
 
 def login_system():
