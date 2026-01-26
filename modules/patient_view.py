@@ -97,7 +97,7 @@ def _draw_test_card(record, test_conf):
 
 def _render_pdf_section(record, patient_name):
     """
-    Блок генерації PDF.
+    Блок генерації PDF із кнопкою завантаження.
     """
     st.subheader("📄 Друк результатів")
 
@@ -124,36 +124,31 @@ def _render_pdf_section(record, patient_name):
         clean_verdict = v_str.replace("🔴", "").replace("🟠", "").replace("🟡", "").replace("🟢", "").replace("✅", "").strip()
         
         # Якщо після чистки нічого не лишилось (значить був тільки смайлик, як у SCORE-2)
-        # Ми вручну додаємо текст залежно від кольору смайлика
         if not clean_verdict:
             if "🔴" in v_str: clean_verdict = "Високий ризик / Патологія"
             elif "🟠" in v_str: clean_verdict = "Середній / Високий ризик"
             elif "🟡" in v_str: clean_verdict = "Помірний ризик / Увага"
             elif "🟢" in v_str or "✅" in v_str: clean_verdict = "Низький ризик / Норма"
-            else: clean_verdict = v_str # Якщо нічого не розпізнали, лишаємо як є
+            else: clean_verdict = v_str 
 
         result_header = f"ВИСНОВОК: {clean_verdict}"
         
         # Додаємо бали тільки якщо це передбачено і вони є
         if test['has_score']:
             try:
-                # Безпечне перетворення в int
                 score_val = int(score) if pd.notna(score) else 0
                 result_header += f" ({score_val} балів)"
             except:
-                pass # Якщо там текст, просто не пишемо бали
+                pass 
         
         # Додаємо у словник
         final_print_dict[f"=== {test['name']} ==="] = result_header
 
         # --- Б. Питання цього тесту ---
         test_questions = {}
-        # Шукаємо питання, що містять search_key (наприклад [SCORE2])
         for col_name, val in record.items():
             if search_key in col_name and not any(x in col_name for x in ['Verdict_', 'Score_', 'Status_', 'Timestamp']):
                 if pd.notna(val) and str(val) != "" and str(val) != "0":
-                    # Очищаємо назву питання від тегу для краси (опціонально)
-                    # clean_q = col_name.replace(f"[{search_key}]", "").strip()
                     test_questions[col_name] = str(val)
         
         final_print_dict.update(test_questions)
@@ -171,9 +166,21 @@ def _render_pdf_section(record, patient_name):
             data_dict=final_print_dict
         )
 
+        # === ДОДАНО: КНОПКА ЗАВАНТАЖЕННЯ ===
+        st.download_button(
+            label="📥 Завантажити PDF-звіт",
+            data=pdf_bytes,
+            file_name=f"Report_{patient_name.replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            type="primary", # Робить кнопку червоною/активною
+            use_container_width=True
+        )
+        # ===================================
+
+        # Відображення прев'ю (Iframe)
         base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
         pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
         st.markdown(pdf_display, unsafe_allow_html=True)
         
     except Exception as e:
-        st.warning(f"⚠️ Попередній перегляд недоступний: {e}")
+        st.warning(f"⚠️ Помилка створення PDF: {e}")
