@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import base64
 from modules import pdf_gen  # Ваш модуль генерації PDF
-from streamlit_pdf_viewer import pdf_viewer
+
 # === КОНФІГУРАЦІЯ ===
 TESTS_CONFIG = [
     {"tag": "Score2",   "name": "SCORE-2 (Серцевий ризик)", "search_key": "SCORE2", "has_score": False},
@@ -98,60 +98,58 @@ def _draw_test_card(record, test_conf):
 def _render_pdf_section(record, patient_name):
     """
     Блок генерації PDF.
-    Тепер формує структуру: [Назва тесту + Результат] -> [Список питань].
+    Використовує нативний HTML <embed> та Кнопку Завантаження.
     """
     st.subheader("📄 Друк результатів")
 
     # 1. Готуємо словник для друку
-    # Ми будемо заповнювати його послідовно, щоб у PDF все йшло блоками
     final_print_dict = {}
 
-    # 2. Проходимося по кожному налаштованому тесту
     for test in TESTS_CONFIG:
-        tag = test['tag']        # Verdict_PHQ
-        search_key = test['search_key'] # [PHQ] (частина тексту питання)
+        tag = test['tag']       
+        search_key = test['search_key'] 
         
-        # --- А. Заголовок блоку (Результат) ---
         verdict = record.get(f"Verdict_{tag}")
         score = record.get(f"Score_{tag}")
         
-        # Якщо тест не пройдений - пропускаємо його
         if pd.isna(verdict) or verdict == "" or verdict == 0 or verdict == "0":
             continue
 
-        # Формуємо красивий рядок результату
-        # Очищаємо від смайликів, бо PDF їх не любить
-        clean_verdict = str(verdict).replace("🔴", "").replace("🟠", "").replace("🟡", "").replace("🟢", "").replace("✅", "").strip()
+        v_str = str(verdict)
+        # Чистимо від смайликів
+        clean_verdict = v_str.replace("🔴", "").replace("🟠", "").replace("🟡", "").replace("🟢", "").replace("✅", "").strip()
         
+        # === ВАЖЛИВО: Якщо після чистки текст пустий (наприклад SCORE-2 був тільки смайлик) ===
+        if not clean_verdict:
+            if "🔴" in v_str: clean_verdict = "Високий ризик / Патологія"
+            elif "🟠" in v_str: clean_verdict = "Середній / Високий ризик"
+            elif "🟡" in v_str: clean_verdict = "Помірний ризик / Увага"
+            elif "🟢" in v_str or "✅" in v_str: clean_verdict = "Низький ризик / Норма"
+            else: clean_verdict = v_str # Якщо смайликів не було, лишаємо як є
+
         result_header = f"ВИСНОВОК: {clean_verdict}"
-        if test['has_score']:
-            result_header += f" ({int(score) if pd.notna(score) else 0} балів)"
         
-        # Додаємо у словник як "Секцію" (ключ починається з === для виділення)
+        if test['has_score']:
+            try:
+                score_val = int(score) if pd.notna(score) else 0
+                result_header += f" ({score_val} балів)"
+            except:
+                pass
+        
         final_print_dict[f"=== {test['name']} ==="] = result_header
 
-        # --- Б. Питання цього тесту ---
-        # Шукаємо всі колонки, які містять search_key (наприклад "[PHQ]")
-        # І не є технічними (Verdict, Score)
         test_questions = {}
         for col_name, val in record.items():
-            # Перевірка: чи містить назва колонки наш ключ (наприклад "[PHQ]")
-            # І чи це НЕ є технічна колонка
-            if search_key in col_name and not any(x in col_name for x in ['Verdict_', 'Score_', 'Status_']):
-                if pd.notna(val) and val != "":
-                    # Скорочуємо дуже довгі назви питань для краси (опціонально)
-                    # Але поки залишимо повні
+            # Фільтруємо технічні колонки
+            if search_key in col_name and not any(x in col_name for x in ['Verdict_', 'Score_', 'Status_', 'Timestamp']):
+                if pd.notna(val) and str(val) != "" and str(val) != "0":
                     test_questions[col_name] = str(val)
         
-        # Додаємо знайдені питання у загальний кошик
         final_print_dict.update(test_questions)
-        
-        # Додаємо пустий рядок-розділювач (віртуальний) для краси
-        final_print_dict[f"   "] = "   " 
+        final_print_dict[f"   "] = "   "
 
-    # 3. Генеруємо PDF
+    # 2. Генеруємо PDF
     try:
-        # Для шапки беремо просто дату
         summary_text = "Деталізований звіт з результатами тестів та відповідями пацієнта."
         
         pdf_bytes = pdf_gen.create_report(
@@ -159,16 +157,16 @@ def _render_pdf_section(record, patient_name):
             date_str=str(pd.Timestamp.now().strftime('%d.%m.%Y')),
             verdict=summary_text, 
             score="", 
-            data_dict=final_print_dict  # Передаємо наш структурований словник
+            data_dict=final_print_dict
         )
 
-        base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
-        st.markdown(pdf_display, unsafe_allow_html=True)
+        # 3. КНОПКА ЗАВАНТАЖЕННЯ (Основний елемент)
+        st.success("✅ Звіт сформовано!")
         
-    except Exception as e:
-        st.warning(f"⚠️ Попередній перегляд недоступний: {e}")
-# === ПОПЕРЕДНІЙ ПЕРЕГЛЯД (Професійний спосіб) ===
-        with st.expander("👁️ Відкрити попередній перегляд"):
-        # Ця функція безпечно показує PDF, браузер її не блокує
-            pdf_viewer(input=pdf_bytes, width=700)
+        st.download_button(
+            label="📥 Завантажити PDF-звіт",
+            data=pdf_bytes,
+            file_name=f"Report_{patient_name.replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True
