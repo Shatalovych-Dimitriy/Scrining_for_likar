@@ -91,7 +91,10 @@ def _draw_test_card(record, test_conf):
 
 
 def _render_pdf_section(record, patient_name):
-    """Блок генерації PDF."""
+    """
+    Блок генерації PDF.
+    Генерує посилання для відкриття PDF у новій вкладці.
+    """
     st.subheader("📄 Друк результатів")
 
     final_print_dict = {}
@@ -147,22 +150,50 @@ def _render_pdf_section(record, patient_name):
             data_dict=final_print_dict
         )
 
-        st.success("✅ Звіт сформовано!")
-        
-        st.download_button(
-            label="📥 Завантажити PDF-звіт",
-            data=pdf_bytes,
-            file_name=f"Report_{patient_name.replace(' ', '_')}.pdf",
-            mime="application/pdf",
-            type="primary",
-            use_container_width=True
-        )
+        st.success("✅ Звіт сформовано успішно!")
 
-        with st.expander("👁️ Показати попередній перегляд на екрані"):
-            base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-            pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf">'
-            st.markdown(pdf_display, unsafe_allow_html=True)
-            st.caption("ℹ️ Якщо документ не відображається коректно, натисніть кнопку 'Завантажити' вище.")
+        # === МАГІЯ: Створюємо посилання для відкриття у новій вкладці ===
+        # 1. Кодуємо PDF у base64
+        base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
         
+        # 2. Створюємо HTML-обгортку. Це змушує браузер відкрити "сторінку", а не файл.
+        # Це обходить блокування Chrome.
+        pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="100%" type="application/pdf" />'
+        html_content = f"""
+            <html>
+            <head><title>Звіт: {patient_name}</title></head>
+            <body style="margin:0; padding:0; overflow:hidden;">
+                {pdf_display}
+            </body>
+            </html>
+        """
+        # 3. Кодуємо HTML у base64
+        base64_html = base64.b64encode(html_content.encode('utf-8')).decode('utf-8')
+        
+        # 4. Виводимо кнопку і посилання
+        col_download, col_open = st.columns(2)
+        
+        with col_download:
+             st.download_button(
+                label="📥 Завантажити PDF (на диск)",
+                data=pdf_bytes,
+                file_name=f"Report_{patient_name.replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                type="secondary",
+                use_container_width=True
+            )
+            
+        with col_open:
+            # Це посилання виглядає як велика червона кнопка
+            # target="_blank" відкриває у новій вкладці
+            href = f'<a href="data:text/html;base64,{base64_html}" target="_blank" style="text-decoration:none;">' \
+                   f'<button style="width:100%; background-color:#ff4b4b; color:white; border:none; padding:10px; ' \
+                   f'border-radius:5px; cursor:pointer; font-weight:bold;">' \
+                   f'↗️ Відкрити у новій вкладці (Перегляд)</button></a>'
+            
+            st.markdown(href, unsafe_allow_html=True)
+            
+        st.info("ℹ️ Натисніть **'Відкрити у новій вкладці'**, щоб переглянути документ у браузері без завантаження.")
+
     except Exception as e:
         st.error(f"⚠️ Помилка генерації PDF: {e}")
