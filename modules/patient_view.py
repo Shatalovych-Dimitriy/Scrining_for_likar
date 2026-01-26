@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import base64
-from modules import pdf_gen  # Ваш модуль генерації PDF
+from modules import pdf_gen  
 
 # === КОНФІГУРАЦІЯ ===
 TESTS_CONFIG = [
@@ -17,7 +17,6 @@ def show_dashboard(df):
     """Головний екран картки пацієнта."""
     st.header("🗂 Результати скринінгу")
 
-    # --- 1. ПОШУК ПАЦІЄНТА ---
     search_col = 'ПІБ'
     if search_col not in df.columns:
         st.error(f"Помилка: Відсутня колонка '{search_col}'.")
@@ -27,7 +26,6 @@ def show_dashboard(df):
     selected_patient = st.selectbox("🔍 Пошук пацієнта:", patient_list)
     record = df[df[search_col] == selected_patient].iloc[0]
 
-    # --- 2. ІНФО-ПАНЕЛЬ ---
     st.divider()
     col1, col2, col3, col4 = st.columns(4)
     
@@ -59,7 +57,6 @@ def show_dashboard(df):
 
     st.divider()
 
-    # --- 3. СІТКА РЕЗУЛЬТАТІВ ---
     st.subheader("📊 Показники здоров'я (Вердикти)")
     cols = st.columns(3)
     for index, test in enumerate(TESTS_CONFIG):
@@ -67,8 +64,6 @@ def show_dashboard(df):
             _draw_test_card(record, test)
 
     st.divider()
-
-    # --- 4. ПДФ ТА ДРУК ---
     _render_pdf_section(record, selected_patient)
 
 
@@ -96,13 +91,9 @@ def _draw_test_card(record, test_conf):
 
 
 def _render_pdf_section(record, patient_name):
-    """
-    Блок генерації PDF.
-    Використовує нативний HTML <embed> та Кнопку Завантаження.
-    """
+    """Блок генерації PDF."""
     st.subheader("📄 Друк результатів")
 
-    # 1. Готуємо словник для друку
     final_print_dict = {}
 
     for test in TESTS_CONFIG:
@@ -116,16 +107,14 @@ def _render_pdf_section(record, patient_name):
             continue
 
         v_str = str(verdict)
-        # Чистимо від смайликів
         clean_verdict = v_str.replace("🔴", "").replace("🟠", "").replace("🟡", "").replace("🟢", "").replace("✅", "").strip()
         
-        # === ВАЖЛИВО: Якщо після чистки текст пустий (наприклад SCORE-2 був тільки смайлик) ===
         if not clean_verdict:
             if "🔴" in v_str: clean_verdict = "Високий ризик / Патологія"
             elif "🟠" in v_str: clean_verdict = "Середній / Високий ризик"
             elif "🟡" in v_str: clean_verdict = "Помірний ризик / Увага"
             elif "🟢" in v_str or "✅" in v_str: clean_verdict = "Низький ризик / Норма"
-            else: clean_verdict = v_str # Якщо смайликів не було, лишаємо як є
+            else: clean_verdict = v_str
 
         result_header = f"ВИСНОВОК: {clean_verdict}"
         
@@ -140,7 +129,6 @@ def _render_pdf_section(record, patient_name):
 
         test_questions = {}
         for col_name, val in record.items():
-            # Фільтруємо технічні колонки
             if search_key in col_name and not any(x in col_name for x in ['Verdict_', 'Score_', 'Status_', 'Timestamp']):
                 if pd.notna(val) and str(val) != "" and str(val) != "0":
                     test_questions[col_name] = str(val)
@@ -148,7 +136,6 @@ def _render_pdf_section(record, patient_name):
         final_print_dict.update(test_questions)
         final_print_dict[f"   "] = "   "
 
-    # 2. Генеруємо PDF
     try:
         summary_text = "Деталізований звіт з результатами тестів та відповідями пацієнта."
         
@@ -160,7 +147,6 @@ def _render_pdf_section(record, patient_name):
             data_dict=final_print_dict
         )
 
-        # 3. КНОПКА ЗАВАНТАЖЕННЯ (Основний елемент)
         st.success("✅ Звіт сформовано!")
         
         st.download_button(
@@ -170,3 +156,13 @@ def _render_pdf_section(record, patient_name):
             mime="application/pdf",
             type="primary",
             use_container_width=True
+        )
+
+        with st.expander("👁️ Показати попередній перегляд на екрані"):
+            base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+            pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf">'
+            st.markdown(pdf_display, unsafe_allow_html=True)
+            st.caption("ℹ️ Якщо документ не відображається коректно, натисніть кнопку 'Завантажити' вище.")
+        
+    except Exception as e:
+        st.error(f"⚠️ Помилка генерації PDF: {e}")
