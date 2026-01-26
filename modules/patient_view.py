@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import base64
 from modules import pdf_gen  # Ваш модуль генерації PDF
-
+from streamlit_pdf_viewer import pdf_viewer
 # === КОНФІГУРАЦІЯ ===
 TESTS_CONFIG = [
     {"tag": "Score2",   "name": "SCORE-2 (Серцевий ризик)", "search_key": "SCORE2", "has_score": False},
@@ -168,5 +168,7 @@ def _render_pdf_section(record, patient_name):
         
     except Exception as e:
         st.warning(f"⚠️ Попередній перегляд недоступний: {e}")
-        with st.expander("Переглянути структуру даних"):
-            st.write(final_print_dict)
+# === ПОПЕРЕДНІЙ ПЕРЕГЛЯД (Професійний спосіб) ===
+        with st.expander("👁️ Відкрити попередній перегляд"):
+        # Ця функція безпечно показує PDF, браузер її не блокує
+            pdf_viewer(input=pdf_bytes, width=700)
