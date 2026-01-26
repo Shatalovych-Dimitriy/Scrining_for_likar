@@ -116,4 +116,53 @@ def _render_pdf_section(record, patient_name):
             elif "🟢" in v_str or "✅" in v_str: clean_verdict = "Низький ризик / Норма"
             else: clean_verdict = v_str
 
-        result_header = f"ВИСНОВОК: {clean_verdict
+        result_header = f"ВИСНОВОК: {clean_verdict}"
+        
+        if test['has_score']:
+            try:
+                score_val = int(score) if pd.notna(score) else 0
+                result_header += f" ({score_val} балів)"
+            except:
+                pass
+        
+        final_print_dict[f"=== {test['name']} ==="] = result_header
+
+        test_questions = {}
+        for col_name, val in record.items():
+            if search_key in col_name and not any(x in col_name for x in ['Verdict_', 'Score_', 'Status_', 'Timestamp']):
+                if pd.notna(val) and str(val) != "" and str(val) != "0":
+                    test_questions[col_name] = str(val)
+        
+        final_print_dict.update(test_questions)
+        final_print_dict[f"   "] = "   "
+
+    try:
+        summary_text = "Деталізований звіт з результатами тестів та відповідями пацієнта."
+        
+        pdf_bytes = pdf_gen.create_report(
+            patient_name=patient_name,
+            date_str=str(pd.Timestamp.now().strftime('%d.%m.%Y')),
+            verdict=summary_text, 
+            score="", 
+            data_dict=final_print_dict
+        )
+
+        st.success("✅ Звіт сформовано!")
+        
+        st.download_button(
+            label="📥 Завантажити PDF-звіт",
+            data=pdf_bytes,
+            file_name=f"Report_{patient_name.replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            type="primary",
+            use_container_width=True
+        )
+
+        with st.expander("👁️ Показати попередній перегляд на екрані"):
+            base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
+            pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf">'
+            st.markdown(pdf_display, unsafe_allow_html=True)
+            st.caption("ℹ️ Якщо документ не відображається коректно, натисніть кнопку 'Завантажити' вище.")
+        
+    except Exception as e:
+        st.error(f"⚠️ Помилка генерації PDF: {e}")
