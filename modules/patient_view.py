@@ -13,6 +13,60 @@ TESTS_CONFIG = [
     {"tag": "Smoke",    "name": "Нікотинова залежність",   "search_key": "Паління",  "has_score": True}
 ]
 
+def recalculate_score2_local(record, new_cholesterol):
+    """
+    Локальний перерахунок SCORE-2, якщо лікар ввів холестерин вручну.
+    Дублює логіку з data_manager, щоб працювати миттєво.
+    """
+    sex = record.get('Вкажіть стать', 'Не вказано')
+    smoke = record.get('[SCORE2] Куріння тютюнових виробів', 'Ні')
+    age = int(record.get('Вік', 0))
+    sbp = float(record.get('[SCORE2] Систолічний артеріальний тиск', 0))
+    chol = float(new_cholesterol) # Використовуємо нове значення
+
+    if age == 0: return "⚪ Недостатньо даних (Вік)"
+    if chol == 0: return "⚪ Недостатньо даних (Холестерин)"
+
+    def is_green():
+        if sex == 'жінка' and smoke == 'Ні':
+            if age < 45 and sbp < 120 and chol <= 5: return True
+            if 49 < age < 55 and sbp < 120 and chol <= 3: return True
+        return False
+
+    def is_yellow():
+        if sbp >= 180 or chol >= 8: return False
+        # ЖІНКИ
+        if sex == 'жінка':
+            if smoke == 'Ні':
+                if age < 50: return True 
+                if 50 <= age < 55: return not (sbp >= 160 or (sbp >= 140 and chol >= 6))
+                if 55 <= age < 60: return not (sbp >= 160 or (sbp >= 140 and chol >= 5))
+                if 60 <= age < 70: return not (sbp >= 140 or chol >= 6)
+                if 70 <= age < 90: return not (sbp >= 160 or chol >= 7)
+            else: # Палять
+                if age < 50: return not (sbp >= 160 or (sbp >= 140 and chol >= 6))
+                if 50 <= age < 55: return not (sbp >= 160 or (sbp >= 140 and chol >= 5))
+                if 55 <= age < 70: return not (sbp >= 140 or (sbp >= 120 and chol >= 5))
+                if 70 <= age < 90: return not (sbp >= 140 or chol >= 6)
+        # ЧОЛОВІКИ
+        elif sex == 'чоловік':
+            if smoke == 'Ні':
+                if age < 50: return not (sbp >= 160 or (sbp >= 140 and chol >= 6))
+                if 50 <= age < 55: return not (sbp >= 160 or (sbp >= 140 and chol >= 5))
+                if 55 <= age < 70: return not (sbp >= 140 or chol >= 6)
+                if 70 <= age < 90: return not (sbp >= 140 or chol >= 6)
+            else: # Палять
+                if age < 50: return not (sbp >= 160 or (sbp >= 140 and chol >= 5))
+                if 50 <= age < 55: return not (sbp >= 140 or chol >= 6)
+                if 55 <= age < 70: return not (sbp >= 120 or chol >= 4)
+                if 70 <= age < 90: return not (sbp >= 120 or chol >= 5)
+        return False
+
+    if is_green(): return "🟢 Низький ризик"
+    elif is_yellow(): return "🟡 Помірний ризик"
+    else: return "🔴 Високий ризик"
+
+
 def show_dashboard(df):
     """Головний екран картки пацієнта."""
     st.header("🗂 Результати скринінгу")
@@ -25,7 +79,9 @@ def show_dashboard(df):
 
     patient_list = sorted(df[search_col].unique().astype(str))
     selected_patient = st.selectbox("🔍 Пошук пацієнта:", patient_list)
-    record = df[df[search_col] == selected_patient].iloc[0]
+    
+    # Робимо копію запису, щоб ми могли її міняти (вводити холестерин) не ламаючи кеш
+    record = df[df[search_col] == selected_patient].iloc[0].copy()
 
     # --- 2. ІНФО-ПАНЕЛЬ ---
     st.divider()
@@ -59,6 +115,38 @@ def show_dashboard(df):
 
     st.divider()
 
+    # === БЛОК РУЧНОГО ВВОДУ ХОЛЕСТЕРИНУ ===
+    # Отримуємо поточне значення з таблиці (якщо воно там є)
+    chol_col_name = '[SCORE2] Рівень non-HDL холестерину (ммоль/л)'
+    current_chol = float(record.get(chol_col_name, 0))
+    
+    # Створюємо розгортайку для введення аналізів
+    with st.expander("💉 Ввести/Змінити рівень холестерину вручну (для розрахунку SCORE-2)", expanded=(current_chol == 0)):
+        col_input, col_info = st.columns([1, 3])
+        with col_input:
+            manual_chol = st.number_input(
+                "Non-HDL (ммоль/л):", 
+                min_value=0.0, 
+                max_value=20.0, 
+                value=current_chol,
+                step=0.1,
+                help="Введіть значення з лабораторії. Результат SCORE-2 оновиться автоматично."
+            )
+        with col_info:
+            if manual_chol > 0:
+                st.info(f"Використовується значення: **{manual_chol} ммоль/л**")
+            else:
+                st.warning("⚠️ Для розрахунку SCORE-2 необхідний рівень холестерину!")
+
+    # === ОНОВЛЕННЯ ДАНИХ ДЛЯ ВІДОБРАЖЕННЯ ===
+    # Якщо лікар ввів нове число, ми оновлюємо record "на льоту"
+    if manual_chol != current_chol:
+        record[chol_col_name] = manual_chol
+        # Перераховуємо вердикт SCORE-2
+        new_verdict = recalculate_score2_local(record, manual_chol)
+        record['Verdict_Score2'] = new_verdict
+        st.toast(f"SCORE-2 перераховано: {new_verdict}")
+
     # --- 3. СІТКА РЕЗУЛЬТАТІВ ---
     st.subheader("📊 Показники здоров'я (Вердикти)")
     cols = st.columns(3)
@@ -81,7 +169,7 @@ def _draw_test_card(record, test_conf):
     with st.container(border=True):
         st.markdown(f"**{title}**")
         if pd.isna(verdict) or verdict == 0 or verdict == "":
-            st.markdown("⚪ *Не пройдено*")
+            st.markdown("⚪ *Не пройдено / Немає даних*")
         else:
             v_str = str(verdict)
             if any(x in v_str for x in ["Тяжк", "Клінічн", "Високий", "Залежність", "🔴"]):
@@ -97,54 +185,44 @@ def _draw_test_card(record, test_conf):
 
 def _render_pdf_section(record, patient_name):
     """
-    Блок генерації PDF із кнопкою завантаження.
+    Блок генерації PDF.
     """
     st.subheader("📄 Друк результатів")
 
     # 1. Готуємо словник для друку
     final_print_dict = {}
 
-    # 2. Проходимося по кожному налаштованому тесту
     for test in TESTS_CONFIG:
-        tag = test['tag']        # Verdict_PHQ
-        search_key = test['search_key'] # [PHQ]
+        tag = test['tag']       
+        search_key = test['search_key'] 
         
-        # --- А. Заголовок блоку (Результат) ---
         verdict = record.get(f"Verdict_{tag}")
         score = record.get(f"Score_{tag}")
         
-        # Пропускаємо, якщо немає вердикту
         if pd.isna(verdict) or verdict == "" or verdict == 0 or verdict == "0":
             continue
 
-        # === ВИПРАВЛЕННЯ ДЛЯ SCORE-2 (та інших, де тільки смайлик) ===
         v_str = str(verdict)
-        
-        # Спочатку пробуємо очистити від смайликів
         clean_verdict = v_str.replace("🔴", "").replace("🟠", "").replace("🟡", "").replace("🟢", "").replace("✅", "").strip()
         
-        # Якщо після чистки нічого не лишилось (значить був тільки смайлик, як у SCORE-2)
         if not clean_verdict:
             if "🔴" in v_str: clean_verdict = "Високий ризик / Патологія"
             elif "🟠" in v_str: clean_verdict = "Середній / Високий ризик"
             elif "🟡" in v_str: clean_verdict = "Помірний ризик / Увага"
             elif "🟢" in v_str or "✅" in v_str: clean_verdict = "Низький ризик / Норма"
-            else: clean_verdict = v_str 
+            else: clean_verdict = v_str
 
         result_header = f"ВИСНОВОК: {clean_verdict}"
         
-        # Додаємо бали тільки якщо це передбачено і вони є
         if test['has_score']:
             try:
                 score_val = int(score) if pd.notna(score) else 0
                 result_header += f" ({score_val} балів)"
             except:
-                pass 
+                pass
         
-        # Додаємо у словник
         final_print_dict[f"=== {test['name']} ==="] = result_header
 
-        # --- Б. Питання цього тесту ---
         test_questions = {}
         for col_name, val in record.items():
             if search_key in col_name and not any(x in col_name for x in ['Verdict_', 'Score_', 'Status_', 'Timestamp']):
@@ -152,9 +230,9 @@ def _render_pdf_section(record, patient_name):
                     test_questions[col_name] = str(val)
         
         final_print_dict.update(test_questions)
-        final_print_dict[f"   "] = "   " # Розділювач
+        final_print_dict[f"   "] = "   "
 
-    # 3. Генеруємо PDF
+    # 2. Генеруємо PDF
     try:
         summary_text = "Деталізований звіт з результатами тестів та відповідями пацієнта."
         
@@ -166,21 +244,39 @@ def _render_pdf_section(record, patient_name):
             data_dict=final_print_dict
         )
 
-        # === ДОДАНО: КНОПКА ЗАВАНТАЖЕННЯ ===
-        st.download_button(
-            label="📥 Завантажити PDF-звіт",
-            data=pdf_bytes,
-            file_name=f"Report_{patient_name.replace(' ', '_')}.pdf",
-            mime="application/pdf",
-            type="primary", # Робить кнопку червоною/активною
-            use_container_width=True
-        )
-        # ===================================
+        st.success("✅ Звіт сформовано успішно!")
 
-        # Відображення прев'ю (Iframe)
+        # Посилання для відкриття у новій вкладці
         base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-        pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
-        st.markdown(pdf_display, unsafe_allow_html=True)
+        pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="100%" type="application/pdf" />'
+        html_content = f"""
+            <html>
+            <head><title>Звіт: {patient_name}</title></head>
+            <body style="margin:0; padding:0; overflow:hidden;">
+                {pdf_display}
+            </body>
+            </html>
+        """
+        base64_html = base64.b64encode(html_content.encode('utf-8')).decode('utf-8')
         
+        col_download, col_open = st.columns(2)
+        
+        with col_download:
+             st.download_button(
+                label="📥 Завантажити PDF (на диск)",
+                data=pdf_bytes,
+                file_name=f"Report_{patient_name.replace(' ', '_')}.pdf",
+                mime="application/pdf",
+                type="secondary",
+                use_container_width=True
+            )
+            
+        with col_open:
+            href = f'<a href="data:text/html;base64,{base64_html}" target="_blank" style="text-decoration:none;">' \
+                   f'<button style="width:100%; background-color:#ff4b4b; color:white; border:none; padding:10px; ' \
+                   f'border-radius:5px; cursor:pointer; font-weight:bold;">' \
+                   f'↗️ Відкрити у новій вкладці (Перегляд)</button></a>'
+            st.markdown(href, unsafe_allow_html=True)
+
     except Exception as e:
-        st.warning(f"⚠️ Помилка створення PDF: {e}")
+        st.error(f"⚠️ Помилка генерації PDF: {e}")
