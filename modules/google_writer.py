@@ -15,7 +15,7 @@ def save_correction_safe(patient_name, dob_str, cholesterol_val):
         client = gspread.authorize(creds)
         
         # Відкриття таблиці виправлень
-        sheet = client.open_by_url(st.secrets["links"]["corrections_url"]).sheet1
+        sheet = client.open_by_url(st.secrets["links"]["hol_link"]).sheet1
         
         records = sheet.get_all_records()
         row_number = None
