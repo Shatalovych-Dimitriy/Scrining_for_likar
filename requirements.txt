@@ -4,3 +4,4 @@ fpdf
 numpy
 streamlit-pdf-viewer
 gspread
+oauth2client
