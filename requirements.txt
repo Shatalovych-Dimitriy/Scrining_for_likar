@@ -3,4 +3,3 @@ pandas
 fpdf
 numpy
 streamlit-pdf-viewer
-urllib.parse
