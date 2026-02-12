@@ -1,21 +1,19 @@
 import streamlit as st
 import pandas as pd
 import base64
-import urllib.parse # Потрібно для створення посилання
+import urllib.parse
 from modules import pdf_gen 
 
 # ==========================================
 # 🛑 НАЛАШТУВАННЯ ВАШОЇ ГУГЛ ФОРМИ
 # ==========================================
-# Вставте сюди посилання на вашу форму (без /viewform в кінці, якщо є)
-FORM_BASE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfWddfzYXY0O1ftLHcfjaxMPyDAlB73JpSFtVRhL4i1C8mMwQ/viewform"
+FORM_BASE_URL = "https://docs.google.com/forms/d/e/ВАШ_ДОВГИЙ_ID/viewform"
 
-# Вставте сюди коди полів (entry.XXXXX), які ви отримали через "Pre-filled link"
-ENTRY_PIB = "entry.541684930"       # Код для поля ПІБ
-ENTRY_DOB = "entry.376367893"       # Код для поля Дата народження
-ENTRY_CHOL = "entry.145333753"      # Код для поля Холестерин
-
+ENTRY_PIB = "entry.123456789"       # Код ПІБ
+ENTRY_DOB = "entry.987654321"       # Код Дати
+ENTRY_CHOL = "entry.555555555"      # Код Холестерину
 # ==========================================
+
 
 TESTS_CONFIG = [
     {"tag": "Score2",   "name": "SCORE-2 (Серцевий ризик)", "search_key": "SCORE2", "has_score": False},
@@ -79,7 +77,6 @@ def show_dashboard(df):
     """Головний екран."""
     st.header("🗂 Результати скринінгу")
 
-    # --- 1. ПОШУК ---
     search_col = 'ПІБ'
     if search_col not in df.columns:
         st.error(f"Помилка: Відсутня колонка '{search_col}'.")
@@ -89,7 +86,6 @@ def show_dashboard(df):
     selected_patient = st.selectbox("🔍 Пошук пацієнта:", patient_list)
     record = df[df[search_col] == selected_patient].iloc[0].copy()
 
-    # --- 2. ІНФО ---
     st.divider()
     col1, col2, col3, col4 = st.columns(4)
     with col1:
@@ -116,7 +112,7 @@ def show_dashboard(df):
 
     st.divider()
 
-    # === БЛОК ВВОДУ (ЧЕРЕЗ ГУГЛ ФОРМУ) ===
+    # === БЛОК ВВОДУ ===
     st.markdown("### 🧪 Введення аналізів")
     
     col_chol = '[SCORE2] Рівень non-HDL холестерину (ммоль/л)'
@@ -126,29 +122,42 @@ def show_dashboard(df):
     
     with col_in:
         st.metric("Поточне значення в базі:", value=current_val)
-        # Це поле просто для зручності, щоб людина ввела цифру перед переходом
         new_val_local = st.number_input("Нове значення:", min_value=0.0, step=0.1, key="input_chol")
 
     with col_action:
         st.write("")
         
-        # 1. ФОРМУВАННЯ ПОСИЛАННЯ
-        # Готуємо дані
-        dob_val = record.get('Дата народження')
-        dob_str = dob_val.strftime('%d.%m.%Y') if isinstance(dob_val, pd.Timestamp) else str(dob_val)
+        # === ПІДГОТОВКА ДАНИХ ДЛЯ URL (ВИПРАВЛЕННЯ ПОМИЛОК) ===
         
-        # Параметри для URL
+        # 1. ВИПРАВЛЕННЯ ДАТИ: Google вимагає YYYY-MM-DD
+        raw_dob = record.get('Дата народження')
+        try:
+            # Якщо це вже Timestamp, конвертуємо в ISO
+            if isinstance(raw_dob, pd.Timestamp):
+                dob_for_google = raw_dob.strftime('%Y-%m-%d')
+            else:
+                # Якщо це рядок, пробуємо розпізнати і перевернути
+                dob_for_google = pd.to_datetime(str(raw_dob), dayfirst=True).strftime('%Y-%m-%d')
+        except:
+            dob_for_google = str(raw_dob) # Якщо не вийшло, віддаємо як є
+
+        # 2. ВИПРАВЛЕННЯ ХОЛЕСТЕРИНУ: Замінюємо крапку на кому
+        if new_val_local > 0:
+            chol_for_google = str(new_val_local).replace('.', ',')
+        else:
+            chol_for_google = ""
+
+        # Формуємо параметри
         params = {
             ENTRY_PIB: record['ПІБ'],
-            ENTRY_DOB: dob_str,
-            ENTRY_CHOL: str(new_val_local) if new_val_local > 0 else "" 
+            ENTRY_DOB: dob_for_google,
+            ENTRY_CHOL: chol_for_google
         }
-        # Кодуємо в рядок (наприклад ПІБ з пробілами перетвориться в %20)
+        
         query_string = urllib.parse.urlencode(params)
         final_link = f"{FORM_BASE_URL}?{query_string}"
         
-        # 2. КНОПКИ
-        st.info("Натисніть кнопку, щоб відкрити Форму збереження. Потім натисніть 'Оновити'.")
+        st.info("Натисніть кнопку, щоб відкрити Форму. Потім натисніть 'Оновити'.")
         
         col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
@@ -158,14 +167,12 @@ def show_dashboard(df):
                 st.cache_data.clear()
                 st.rerun()
 
-    # Візуальний ефект "на льоту" (поки не оновили базу)
     if new_val_local > 0:
         record[col_chol] = new_val_local
         record['Verdict_Score2'] = recalculate_score2_local(record, new_val_local)
 
     st.divider()
 
-    # --- 3. КАРТКИ ---
     st.subheader("📊 Показники здоров'я (Вердикти)")
     cols = st.columns(3)
     for index, test in enumerate(TESTS_CONFIG):
@@ -173,8 +180,6 @@ def show_dashboard(df):
             _draw_test_card(record, test)
 
     st.divider()
-
-    # --- 4. ПДФ ---
     _render_pdf_section(record, selected_patient)
 
 
@@ -203,10 +208,7 @@ def _draw_test_card(record, test_conf):
 
 
 def _render_pdf_section(record, patient_name):
-    """Блок генерації PDF."""
     st.subheader("📄 Друк результатів")
-
-    # 1. Готуємо дані
     final_print_dict = {}
     for test in TESTS_CONFIG:
         tag = test['tag']       
@@ -214,7 +216,6 @@ def _render_pdf_section(record, patient_name):
         verdict = record.get(f"Verdict_{tag}")
         score = record.get(f"Score_{tag}")
         if pd.isna(verdict) or verdict == "" or verdict == 0 or verdict == "0": continue
-
         v_str = str(verdict)
         clean_verdict = v_str.replace("🔴", "").replace("🟠", "").replace("🟡", "").replace("🟢", "").replace("✅", "").strip()
         if not clean_verdict:
@@ -223,16 +224,13 @@ def _render_pdf_section(record, patient_name):
             elif "🟡" in v_str: clean_verdict = "Помірний ризик / Увага"
             elif "🟢" in v_str or "✅" in v_str: clean_verdict = "Низький ризик / Норма"
             else: clean_verdict = v_str
-
         result_header = f"ВИСНОВОК: {clean_verdict}"
         if test['has_score']:
             try:
                 score_val = int(score) if pd.notna(score) else 0
                 result_header += f" ({score_val} балів)"
             except: pass
-        
         final_print_dict[f"=== {test['name']} ==="] = result_header
-
         test_questions = {}
         for col_name, val in record.items():
             if search_key in col_name and not any(x in col_name for x in ['Verdict_', 'Score_', 'Status_', 'Timestamp']):
@@ -241,10 +239,8 @@ def _render_pdf_section(record, patient_name):
         final_print_dict.update(test_questions)
         final_print_dict[f"   "] = "   "
 
-    # 2. Генеруємо PDF
     try:
         summary_text = "Деталізований звіт з результатами тестів та відповідями пацієнта."
-        
         pdf_bytes = pdf_gen.create_report(
             patient_name=patient_name,
             date_str=str(pd.Timestamp.now().strftime('%d.%m.%Y')),
@@ -252,10 +248,7 @@ def _render_pdf_section(record, patient_name):
             score="", 
             data_dict=final_print_dict
         )
-
-        # 3. ВІДОБРАЖЕННЯ (Success -> Button -> Expander)
         st.success("✅ Звіт сформовано!")
-
         st.download_button(
             label="📥 Завантажити PDF-звіт",
             data=pdf_bytes,
@@ -264,12 +257,10 @@ def _render_pdf_section(record, patient_name):
             type="primary",
             use_container_width=True
         )
-
         with st.expander("👁️ Показати попередній перегляд на екрані"):
             base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
             pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf">'
             st.markdown(pdf_display, unsafe_allow_html=True)
             st.caption("ℹ️ Якщо документ не відображається коректно, натисніть кнопку 'Завантажити' вище.")
-        
     except Exception as e:
         st.error(f"⚠️ Помилка генерації PDF: {e}")
