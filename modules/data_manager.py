@@ -180,4 +180,144 @@ def process_doctor_data(df):
     # FINDRISK
     df['Score_FINDRISK'] = 0
     for col_name, mapping in FINDRISC_MAPPING.items():
-        if col_name in df.columns: df['Score_FINDRISK'] += df
+        if col_name in df.columns: df['Score_FINDRISK'] += df[col_name].map(mapping).fillna(0)
+
+    if 'Вік' in df.columns:
+        age_points = pd.cut(df['Вік'], bins=[0, 44, 54, 64, float('inf')], labels=[0, 2, 3, 4], include_lowest=True).fillna(0).astype(int)
+        df['Score_FINDRISK'] += age_points
+
+    col_bmi = '[Findrisc] ІМТ (кг/м2)'
+    if col_bmi in df.columns:
+        bmi_numeric = pd.to_numeric(df[col_bmi], errors='coerce')
+        bmi_points = pd.cut(bmi_numeric, bins=[0, 25, 30, float('inf')], labels=[0, 1, 3], include_lowest=True, right=False).fillna(0).astype(int)
+        df['Score_FINDRISK'] += bmi_points
+
+    col_waist = '[Findrisc] Окружність талії, виміряна нижче ребер (см)'
+    col_sex = 'Вкажіть стать'
+    if col_waist in df.columns and col_sex in df.columns:
+        waist_numeric = pd.to_numeric(df[col_waist], errors='coerce').fillna(0)
+        is_male = df[col_sex] == 'чоловік'
+        conditions = [(is_male & (waist_numeric > 102)) | (~is_male & (waist_numeric > 88)), (is_male & (waist_numeric > 94)) | (~is_male & (waist_numeric > 80))]
+        waist_points = np.select(conditions, [4, 3], default=0)
+        df['Score_FINDRISK'] += waist_points
+
+    df['Verdict_FINDRISK'] = df['Score_FINDRISK'].apply(get_findrisc_verdict)
+    df['Status_Doctor_Done'] = True
+    return df    
+
+# ==========================================
+# 4. ФУНКЦІЇ ДЛЯ ВИПРАВЛЕНЬ (НОВЕ!!!)
+# ==========================================
+
+def normalize_date_str(date_obj):
+    """Приводить будь-яку дату до формату DD.MM.YYYY для порівняння"""
+    try:
+        if pd.isna(date_obj) or str(date_obj).strip() == "": return ""
+        if isinstance(date_obj, pd.Timestamp): return date_obj.strftime('%d.%m.%Y')
+        d_str = str(date_obj).strip()
+        dt = pd.to_datetime(d_str, dayfirst=True, errors='coerce')
+        if not pd.isna(dt): return dt.strftime('%d.%m.%Y')
+        return d_str
+    except: return str(date_obj)
+
+def load_corrections_dict():
+    """Завантажує таблицю виправлень з CSV"""
+    try:
+        url = st.secrets["links"].get("corrections_url")
+        if not url: return {}
+
+        df = pd.read_csv(url).fillna("")
+        corrections = {}
+        for _, row in df.iterrows():
+            # Назви колонок у вашій формі можуть бути іншими! Перевірте CSV.
+            # Тут ми шукаємо "ПІБ", "Дата народження", "Cholesterol"
+            
+            pib = str(row.get('ПІБ', '')).strip() # Або 'Прізвище Ім'я По батькові'
+            dob_raw = row.get('Дата народження', '')
+            dob_norm = normalize_date_str(dob_raw)
+            
+            # Шукаємо холестерин. Може називатися по-різному
+            val = None
+            if 'Cholesterol' in row: val = row['Cholesterol']
+            elif 'Холестерин' in row: val = row['Холестерин']
+            elif 'Рівень холестерину' in row: val = row['Рівень холестерину']
+            
+            if pib and val:
+                key = (pib, dob_norm)
+                try:
+                    val_clean = str(val).replace(',', '.')
+                    corrections[key] = float(val_clean)
+                except: pass
+        return corrections
+    except Exception as e:
+        print(f"Error loading corrections: {e}")
+        return {}
+
+# ==========================================
+# 5. ГОЛОВНИЙ МЕРДЖЕР
+# ==========================================
+@st.cache_data(ttl=60)
+def get_processed_data():
+    dfs_to_merge = []
+
+    for conf in FORMS_CONFIG:
+        try:
+            df = pd.read_csv(conf["url"]).fillna(0)
+            target_pib = conf["identity_map"]["Name"]
+            target_dob = conf["identity_map"]["DOB"]
+            if target_pib not in df.columns: continue
+            
+            df = df.rename(columns={target_pib: 'ПІБ', target_dob: 'Дата народження'})
+            df['ПІБ'] = df['ПІБ'].astype(str).str.strip()
+            df['Дата народження'] = pd.to_datetime(df['Дата народження'], errors='coerce', dayfirst=True)
+            if 'Позначка часу' in df.columns: df = df.sort_values('Позначка часу', ascending=False)
+            df = df.drop_duplicates(subset=['ПІБ', 'Дата народження'], keep='first')
+            df['Вік'] = df['Дата народження'].apply(calculate_age)
+
+            if conf["id"] == "doctor_form": df = process_doctor_data(df)
+            elif conf["id"] == "patient_form": df = process_patient_data(df)
+            dfs_to_merge.append(df)
+        except Exception as e:
+            print(f"Error: {e}")
+
+    if not dfs_to_merge: return pd.DataFrame()
+
+    full_df = reduce(lambda left, right: pd.merge(left, right, on=['ПІБ', 'Дата народження'], how='outer', suffixes=('_doc', '_pat')), dfs_to_merge)
+    
+    if 'Вік_doc' in full_df.columns: full_df['Вік'] = full_df['Вік_doc'].combine_first(full_df.get('Вік_pat'))
+    
+    full_df['Status_Doctor_Done'] = full_df['Status_Doctor_Done'].fillna(False)
+    full_df['Status_Patient_Done'] = full_df['Status_Patient_Done'].fillna(False)
+
+    def get_row_status(row):
+        if row['Status_Doctor_Done'] and row['Status_Patient_Done']: return "✅ Повний комплект"
+        elif row['Status_Doctor_Done']: return "⚠️ Тільки лікар"
+        elif row['Status_Patient_Done']: return "⏳ Очікує огляду"
+        else: return "❓ Дані відсутні"
+    
+    if not full_df.empty:
+        full_df['Загальний статус'] = full_df.apply(get_row_status, axis=1)
+
+    # === НАКЛАДАННЯ ВИПРАВЛЕНЬ (ОСЬ ЧОГО НЕ БУЛО) ===
+    corrections = load_corrections_dict()
+    col_chol = '[SCORE2] Рівень non-HDL холестерину (ммоль/л)'
+    
+    if col_chol not in full_df.columns: full_df[col_chol] = 0.0
+
+    def apply_correction(row):
+        name = str(row['ПІБ']).strip()
+        dob_norm = normalize_date_str(row.get('Дата народження'))
+        key = (name, dob_norm)
+        
+        if key in corrections:
+            return corrections[key] # Пріоритет: Таблиця виправлень
+        return row[col_chol] # Інакше: Основна таблиця
+
+    full_df[col_chol] = full_df.apply(apply_correction, axis=1)
+    
+    # Фінальний розрахунок SCORE2
+    try:
+        full_df['Verdict_Score2'] = full_df.apply(get_score2_verdict_row, axis=1)
+    except: pass
+
+    return full_df
