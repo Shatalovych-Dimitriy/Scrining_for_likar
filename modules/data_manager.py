@@ -223,7 +223,7 @@ def normalize_date_str(date_obj):
 def load_corrections_dict():
     """Завантажує таблицю виправлень з CSV"""
     try:
-        url = st.secrets["links"].get("corrections_url")
+        url = st.secrets["links"].get("hol_table_link")
         if not url: return {}
 
         df = pd.read_csv(url).fillna("")
