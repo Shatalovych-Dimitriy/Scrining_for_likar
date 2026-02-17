@@ -1,3 +1,4 @@
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -223,7 +224,7 @@ def normalize_date_str(date_obj):
 def load_corrections_dict():
     """Завантажує таблицю виправлень з CSV"""
     try:
-        url = st.secrets["links"].get("hol_table_link")
+        url = st.secrets["links"]["hol_table_link"]
         if not url: return {}
 
         df = pd.read_csv(url).fillna("")
