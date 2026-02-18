@@ -3,7 +3,7 @@ import pandas as pd
 import base64
 import urllib.parse
 from modules import pdf_gen 
-
+from streamlit_pdf_viewer import pdf_viewer
 
 # ==========================================
 # 🛑 НАЛАШТУВАННЯ ВАШОЇ ГУГЛ ФОРМИ
@@ -210,7 +210,6 @@ def _draw_test_card(record, test_conf):
             if score is not None:
                 st.caption(f"Бали: {score}")
 
-
 def _render_pdf_section(record, patient_name):
     st.subheader("📄 Друк результатів")
     final_print_dict = {}
@@ -245,6 +244,7 @@ def _render_pdf_section(record, patient_name):
 
     try:
         summary_text = "Деталізований звіт з результатами тестів та відповідями пацієнта."
+        # Генеруємо байт-код PDF
         pdf_bytes = pdf_gen.create_report(
             patient_name=patient_name,
             date_str=str(pd.Timestamp.now().strftime('%d.%m.%Y')),
@@ -252,7 +252,10 @@ def _render_pdf_section(record, patient_name):
             score="", 
             data_dict=final_print_dict
         )
+        
         st.success("✅ Звіт сформовано!")
+        
+        # Кнопка завантаження
         st.download_button(
             label="📥 Завантажити PDF-звіт",
             data=pdf_bytes,
@@ -261,10 +264,11 @@ def _render_pdf_section(record, patient_name):
             type="primary",
             use_container_width=True
         )
-        with st.expander("👁️ Показати попередній перегляд на екрані"):
-            base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-            pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf">'
-            st.markdown(pdf_display, unsafe_allow_html=True)
-            st.caption("ℹ️ Якщо документ не відображається коректно, натисніть кнопку 'Завантажити' вище.")
+
+        # === ВИПРАВЛЕНИЙ ПОПЕРЕДНІЙ ПЕРЕГЛЯД ===
+        with st.expander("👁️ Показати попередній перегляд на екрані", expanded=True):
+            # Використовуємо спеціальний компонент замість HTML embed
+            pdf_viewer(input=pdf_bytes, width=700, height=800)
+
     except Exception as e:
         st.error(f"⚠️ Помилка генерації PDF: {e}")
