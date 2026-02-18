@@ -13,7 +13,7 @@ pd.set_option('future.no_silent_downcasting', True)
 try:
     url_doctor = st.secrets["links"]["doktor_link"]
     url_patient = st.secrets["links"]["patient_link"]
-    url_corrections = st.secrets["links"]["corrections_url"]
+    url_corrections = st.secrets["links"]["hol_table_link"]
 except Exception:
     url_doctor = ""
     url_patient = ""
