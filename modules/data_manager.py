@@ -146,19 +146,34 @@ def get_score2_verdict_row(row):
 # ==========================================
 # 3. ФУНКЦІЇ ОБРОБКИ ДАНИХ (ВАШІ СТАРІ ПРОЦЕСОРИ)
 # ==========================================
+# ==========================================
+# 3. ФУНКЦІЇ ОБРОБКИ ДАНИХ (ВИПРАВЛЕНО КОМИ)
+# ==========================================
+
+def to_float_safe(series):
+    """Допоміжна функція: міняє коми на крапки і робить числами"""
+    return pd.to_numeric(series.astype(str).str.replace(',', '.', regex=False), errors='coerce').fillna(0)
 
 def process_patient_data(df):
     df = df.copy()
+    
+    # Текстові мапи працюють нормально, тут коми не важливі
     df['Score_PHQ'] = calculate_section_score(df, '[PHQ]', POINTS_MAP_PHQ)
     df['Verdict_PHQ'] = df['Score_PHQ'].apply(get_depression_verdict)
     df['Score_GAD'] = calculate_section_score(df, '[GAD]', POINTS_MAP_GAD)
     df['Verdict_GAD'] = df['Score_GAD'].apply(get_gad7_verdict)
 
+    # А ось тут (цифри в курців) треба обережно
     smoke_qty_col = '[Паління] 4. Скільки сигарет ви викурюєте на день?'
-    if smoke_qty_col in df.columns:
-        df[smoke_qty_col] = pd.to_numeric(df[smoke_qty_col], errors='coerce').fillna(0)
-        df[smoke_qty_col] = pd.cut(df[smoke_qty_col], bins=[-1, 10, 20, 30, float('inf')], labels=[0, 1, 2, 3]).astype(int)
+    # Гнучкий пошук
+    found_col = next((c for c in df.columns if "[Паління] 4." in c), None)
     
+    if found_col:
+        # 🔥 ВИПРАВЛЕННЯ: Використовуємо безпечну конвертацію
+        df[found_col] = to_float_safe(df[found_col])
+        df[found_col] = pd.cut(df[found_col], bins=[-1, 10, 20, 30, float('inf')], labels=[0, 1, 2, 3]).astype(int)
+        if found_col != smoke_qty_col: df[smoke_qty_col] = df[found_col]
+
     df['Score_Smoke'] = calculate_section_score(df, '[Паління]', POINTS_MAP_SMOKE)
     df['Verdict_Smoke'] = df['Score_Smoke'].apply(get_smoke_verdict)
     df['Score_Audit'] = calculate_section_score(df, '[ AUDIT]', POINTS_MAP_AUDIT) 
@@ -168,43 +183,65 @@ def process_patient_data(df):
 
 def process_doctor_data(df):
     df = df.copy()
-    if 'Вік' not in df.columns and 'Дата народження' in df.columns:
-         # Вік тут рахується, але для надійності будемо використовувати age з головного процесу
-         pass
     
-    score2_numeric_cols = ['[SCORE2] Систолічний артеріальний тиск', '[SCORE2] Рівень non-HDL холестерину (ммоль/л)']
-    for col in score2_numeric_cols:
-        if col in df.columns: df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-    
-    # FINDRISC
-    df['Score_FINDRISK'] = 0
-    for col_name, mapping in FINDRISC_MAPPING.items():
-        if col_name in df.columns: df['Score_FINDRISK'] += df[col_name].map(mapping).fillna(0)
+    # 1. SCORE2 (Тиск і Холестерин) - Гнучкий пошук + Лікування ком
+    col_sbp = next((c for c in df.columns if "Систолічний" in c and "SCORE2" in c), None)
+    col_chol = next((c for c in df.columns if "non-HDL" in c and "SCORE2" in c), None)
 
+    standard_sbp = '[SCORE2] Систолічний артеріальний тиск'
+    standard_chol = '[SCORE2] Рівень non-HDL холестерину (ммоль/л)'
+
+    if col_sbp: 
+        # 🔥 ВИПРАВЛЕННЯ: міняємо кому на крапку перед конвертацією!
+        df[standard_sbp] = to_float_safe(df[col_sbp])
+        
+    if col_chol: 
+        df[standard_chol] = to_float_safe(df[col_chol])
+    
+    # 2. FINDRISK
+    df['Score_FINDRISK'] = 0
+    
+    # Текстові питання (тут все ок)
+    for col_name, mapping in FINDRISC_MAPPING.items():
+        actual_col = next((c for c in df.columns if col_name.strip() in c), None)
+        if actual_col:
+            df['Score_FINDRISK'] += df[actual_col].map(mapping).fillna(0)
+
+    # Бали за Вік
     if 'Вік' in df.columns:
         age_points = pd.cut(df['Вік'], bins=[0, 44, 54, 64, float('inf')], labels=[0, 2, 3, 4], include_lowest=True).fillna(0).astype(int)
         df['Score_FINDRISK'] += age_points
 
-    col_bmi = '[Findrisc] ІМТ (кг/м2)'
-    if col_bmi in df.columns:
-        bmi_numeric = pd.to_numeric(df[col_bmi], errors='coerce')
+    # ІМТ (Тут теж можуть бути коми!)
+    col_bmi_part = "ІМТ (кг/м2)"
+    col_bmi = next((c for c in df.columns if col_bmi_part in c), None)
+    if col_bmi:
+        # 🔥 ВИПРАВЛЕННЯ
+        bmi_numeric = to_float_safe(df[col_bmi])
         bmi_points = pd.cut(bmi_numeric, bins=[0, 25, 30, float('inf')], labels=[0, 1, 3], include_lowest=True, right=False).fillna(0).astype(int)
         df['Score_FINDRISK'] += bmi_points
 
-    col_waist = '[Findrisc] Окружність талії, виміряна нижче ребер (см)'
-    col_sex = 'Вкажіть стать'
-    if col_waist in df.columns and col_sex in df.columns:
-        waist_numeric = pd.to_numeric(df[col_waist], errors='coerce').fillna(0)
-        is_male = df[col_sex] == 'чоловік'
-        conditions = [(is_male & (waist_numeric > 102)) | (~is_male & (waist_numeric > 88)), (is_male & (waist_numeric > 94)) | (~is_male & (waist_numeric > 80))]
+    # Талія (Тут теж коми!)
+    col_waist_part = "Окружність талії"
+    col_waist = next((c for c in df.columns if col_waist_part in c), None)
+    col_sex = 'Вкажіть стать' 
+
+    if col_waist and col_sex in df.columns:
+        # 🔥 ВИПРАВЛЕННЯ
+        waist_numeric = to_float_safe(df[col_waist])
+        is_male = df[col_sex].astype(str).str.lower() == 'чоловік' # Страхуємось від регістру
+        
+        conditions = [
+            (is_male & (waist_numeric > 102)) | (~is_male & (waist_numeric > 88)), 
+            (is_male & (waist_numeric > 94)) | (~is_male & (waist_numeric > 80))
+        ]
         waist_points = np.select(conditions, [4, 3], default=0)
         df['Score_FINDRISK'] += waist_points
 
     df['Verdict_FINDRISK'] = df['Score_FINDRISK'].apply(get_findrisc_verdict)
     df['Status_Doctor_Done'] = True
-    return df    
-
-# ==========================================
+    return df
+    # ==========================================
 # 4. ГОЛОВНИЙ МЕРДЖЕР (ОНОВЛЕНИЙ ЧЕРЕЗ PANDAS MERGE) 🚀
 # ==========================================
 @st.cache_data(ttl=60)
