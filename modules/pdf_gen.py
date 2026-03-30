@@ -1,6 +1,6 @@
 from fpdf import FPDF
 import os
-
+import pandas as pd
 class PDF(FPDF):
     def header(self):
         # Простий заголовок на кожній сторінці
