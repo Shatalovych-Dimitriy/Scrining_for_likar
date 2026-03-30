@@ -91,30 +91,37 @@ def show_dashboard(df):
         if st.button("🔄 2. Оновити базу (Завантажити нові дані)", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
-
-    st.divider()
-
-    # --- ВІДОБРАЖЕННЯ АНАЛІЗІВ ---
+# --- ВІДОБРАЖЕННЯ АНАЛІЗІВ НА ЕКРАНІ ---
     st.subheader("🩸 Результати лабораторних аналізів")
     
-    # Витягуємо холестерин з датафрейму (він туди потрапив завдяки data_manager)
-    col_chol = '[SCORE2] Рівень non-HDL холестерину (ммоль/л)'
-    current_chol = record.get(col_chol, 0)
-    
-    # Тут ви можете додати інші аналізи, якщо вони є в базі
-    # наприклад: current_gl = record.get('Глюкоза', 0)
-    
-    col_a1, col_a2, col_a3 = st.columns(3)
-    with col_a1:
-        if current_chol and float(current_chol) > 0:
-            st.metric("Холестерин (non-HDL)", f"{current_chol} ммоль/л")
-        else:
-            st.metric("Холестерин (non-HDL)", "Немає даних")
-            
-    # Додайте сюди інші метрики, коли вони з'являться у формі:
-    # with col_a2: st.metric("Глікований гемоглобін", f"{current_hba1c} %")
+    def format_val(key):
+        val = record.get(key, "")
+        if pd.isna(val) or val == "" or str(val).strip() == "nan": return "—"
+        return str(val)
 
-    st.divider()
+    with st.expander("🔬 Переглянути внесені аналізи", expanded=True):
+        col_l1, col_l2, col_l3 = st.columns(3)
+        with col_l1:
+            st.markdown("**(1) Ліпіди та Цукор**")
+            st.write(f"Загальний хол.: **{format_val('Lab_Total_Chol')}**")
+            st.write(f"non-HDL (SCORE2): **{format_val('Lab_Non_HDL')}**")
+            st.write(f"ЛНПЩ: **{format_val('Lab_LDL')}**")
+            st.write(f"Тригліцериди: **{format_val('Lab_TG')}**")
+            st.write(f"HbA1c: **{format_val('Lab_HbA1c')}**")
+        with col_l2:
+            st.markdown("**(2) Загальний крові**")
+            st.write(f"Гемоглобін (HGB): **{format_val('Lab_HGB')}**")
+            st.write(f"Еритроцити (RBC): **{format_val('Lab_RBC')}**")
+            st.write(f"Лейкоцити (WBC): **{format_val('Lab_WBC')}**")
+            st.write(f"Тромбоцити (PLT): **{format_val('Lab_PLT')}**")
+            st.write(f"ШОЕ / Гематокрит: **{format_val('Lab_HCT')}**")
+        with col_l3:
+            st.markdown("**(3) Загальний сечі**")
+            st.write(f"Білок: **{format_val('Lab_Protein')}**")
+            st.write(f"Глюкоза: **{format_val('Lab_Glucose')}**")
+            st.write(f"Кетони: **{format_val('Lab_Ketones')}**")
+            st.write(f"Лейкоцити: **{format_val('Lab_U_WBC')}**")
+            st.write(f"Еритроцити: **{format_val('Lab_U_RBC')}**")
 
     # --- ОПИТУВАЛЬНИКИ ---
     st.subheader("📊 Показники здоров'я (Опитувальники)")
