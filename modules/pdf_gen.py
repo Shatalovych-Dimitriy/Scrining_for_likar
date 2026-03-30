@@ -125,16 +125,12 @@ def create_report(patient_name, date_str, verdict, score, data_dict):
 
 
 def create_lab_report(patient_name, dob_str, date_str, record):
-    """
-    Генерує PDF-звіт по лабораторних аналізах у форматі таблиці (як у Word-документі).
-    """
     pdf = PDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
     font_path = 'Arial.ttf' 
-    if not os.path.exists(font_path): 
-        font_path = 'DejaVuSans.ttf'
+    if not os.path.exists(font_path): font_path = 'DejaVuSans.ttf'
 
     pdf.add_font('CustomFont', '', font_path, uni=True)
     pdf.add_font('CustomFont', 'B', font_path, uni=True)
@@ -142,7 +138,7 @@ def create_lab_report(patient_name, dob_str, date_str, record):
 
     # --- ШАПКА ---
     pdf.set_font('CustomFont', 'B', 16)
-    pdf.set_text_color(0, 80, 160) # Синій колір
+    pdf.set_text_color(0, 80, 160)
     pdf.cell(0, 10, "Скринінг здоров’я 40+", 0, 1, 'L')
     
     pdf.set_font('CustomFont', '', 11)
@@ -156,11 +152,8 @@ def create_lab_report(patient_name, dob_str, date_str, record):
     pdf.set_font('CustomFont', 'B', 14)
     pdf.cell(0, 10, "Результати досліджень", 0, 1, 'C')
     
-    # Шапка таблиці
     pdf.set_fill_color(220, 230, 240)
     pdf.set_font('CustomFont', 'B', 10)
-    
-    # Ширина колонок (разом = 190)
     w_comp = 80; w_res = 30; w_unit = 35; w_ref = 45
     
     pdf.cell(w_comp, 8, "Досліджувані компоненти", border=1, fill=True)
@@ -170,36 +163,60 @@ def create_lab_report(patient_name, dob_str, date_str, record):
     pdf.ln()
 
     # --- ДАНІ ТАБЛИЦІ ---
-    pdf.set_font('CustomFont', '', 10)
-    
-    # Витягуємо дані
-    col_chol = '[SCORE2] Рівень non-HDL холестерину (ммоль/л)'
-    val_chol = record.get(col_chol, "")
-    if pd.isna(val_chol) or val_chol == 0: 
-        val_chol = "—"
-    
+    def get_val(key):
+        val = record.get(key, "")
+        if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() == "nan": return "—"
+        return str(val)
+
     lab_data = [
         {"cat": "Профіль ліпідів", "items": [
-            {"name": "Загальний холестерин (total-C)", "res": "—", "unit": "ммоль/л", "ref": "< 5,2"},
-            {"name": "Холестерин автом. (non-HDL-C)", "res": str(val_chol), "unit": "ммоль/л", "ref": "< 4,89"},
-            {"name": "ЛНПЩ (LDL-C)", "res": "—", "unit": "ммоль/л", "ref": "< 2,59"},
+            {"name": "Загальний холестерин (total-C)", "res": get_val("Lab_Total_Chol"), "unit": "ммоль/л", "ref": "< 5,2"},
+            {"name": "Холестерин автом. (non-HDL-C)", "res": get_val("Lab_Non_HDL"), "unit": "ммоль/л", "ref": "< 4,89"},
+            {"name": "ЛНПЩ (LDL-C)", "res": get_val("Lab_LDL"), "unit": "ммоль/л", "ref": "< 2,59"},
+            {"name": "Тригліцериди (TG)", "res": get_val("Lab_TG"), "unit": "ммоль/л", "ref": "< 2,3"}
         ]},
         {"cat": "Глікований гемоглобін", "items": [
-            {"name": "HbA1c", "res": "—", "unit": "%", "ref": "4.5 - 5.7"},
+            {"name": "HbA1c", "res": get_val("Lab_HbA1c"), "unit": "%", "ref": "4.5 - 5.7"}
+        ]},
+        {"cat": "Загальний аналіз крові", "items": [
+            {"name": "Лейкоцити (WBC)", "res": get_val("Lab_WBC"), "unit": "×10⁹/л", "ref": "4,00-10,0"},
+            {"name": "Лімфоцити (LYM)", "res": get_val("Lab_LYM"), "unit": "×10⁹/л", "ref": "0,6-4,1"},
+            {"name": "Моноцити, еозинофіли, базофіли", "res": get_val("Lab_MID"), "unit": "×10⁹/л", "ref": "0,1-1,8"},
+            {"name": "Гранулоцити (GRA)", "res": get_val("Lab_GRA"), "unit": "×10⁹/л", "ref": "2,0-7,8"},
+            {"name": "LYM%", "res": get_val("Lab_LYM_perc"), "unit": "%", "ref": "20,0-50,0"},
+            {"name": "MID%", "res": get_val("Lab_MID_perc"), "unit": "%", "ref": "1,0-15,0"},
+            {"name": "GRA%", "res": get_val("Lab_GRA_perc"), "unit": "%", "ref": "40,0-70,0"},
+            {"name": "Еритроцити (RBC)", "res": get_val("Lab_RBC"), "unit": "×10¹²/л", "ref": "3,8-5,8"},
+            {"name": "Гемоглобін (HGB)", "res": get_val("Lab_HGB"), "unit": "г/л", "ref": "110-173"},
+            {"name": "Гематокрит (HCT)", "res": get_val("Lab_HCT"), "unit": "%", "ref": "30,0-50,0"},
+            {"name": "MCV", "res": get_val("Lab_MCV"), "unit": "fl", "ref": "84-98"},
+            {"name": "MCH", "res": get_val("Lab_MCH"), "unit": "pg", "ref": "27,5-32,4"},
+            {"name": "MCHC", "res": get_val("Lab_MCHC"), "unit": "г/л", "ref": "317-342"},
+            {"name": "Тромбоцити (PLT)", "res": get_val("Lab_PLT"), "unit": "×10⁹/л", "ref": "100-300"},
+            {"name": "Тромбокрит (PCT)", "res": get_val("Lab_PCT"), "unit": "%", "ref": "0,1-0,5"}
+        ]},
+        {"cat": "Загальний аналіз сечі", "items": [
+            {"name": "Питома вага", "res": get_val("Lab_SG"), "unit": "-", "ref": "1.005 - 1.025"},
+            {"name": "pH", "res": get_val("Lab_pH"), "unit": "-", "ref": "5.5 - 7.0"},
+            {"name": "Білок", "res": get_val("Lab_Protein"), "unit": "г/л", "ref": "< 0.15"},
+            {"name": "Глюкоза", "res": get_val("Lab_Glucose"), "unit": "ммоль/л", "ref": "не виявлено"},
+            {"name": "Кетонові тіла", "res": get_val("Lab_Ketones"), "unit": "ммоль/л", "ref": "не виявлено"},
+            {"name": "Білірубін (BIL)", "res": get_val("Lab_BIL"), "unit": "мкмоль/л", "ref": "не виявлено"},
+            {"name": "Уробіліноген (UBG)", "res": get_val("Lab_UBG"), "unit": "мкмоль/л", "ref": "0 - 17"},
+            {"name": "Нітрити (NIT)", "res": get_val("Lab_NIT"), "unit": "-", "ref": "негативний"},
+            {"name": "Лейкоцити (сеча)", "res": get_val("Lab_U_WBC"), "unit": "лейко/мкл", "ref": "не виявлено"},
+            {"name": "Еритроцити (сеча)", "res": get_val("Lab_U_RBC"), "unit": "еритр/мкл", "ref": "не виявлено"}
         ]}
     ]
 
     for category in lab_data:
-        # Назва категорії (сірий фон)
         pdf.set_fill_color(240, 240, 240)
         pdf.set_font('CustomFont', 'B', 10)
         pdf.cell(190, 8, category["cat"], border=1, fill=True, ln=1)
         
         pdf.set_font('CustomFont', '', 10)
         for item in category["items"]:
-            # Зберігаємо Y, щоб зробити мультисел для довгих назв
             y_before = pdf.get_y()
-            
             if y_before > 260:
                 pdf.add_page()
                 y_before = pdf.get_y()
@@ -225,14 +242,13 @@ def create_lab_report(patient_name, dob_str, date_str, record):
         "що охоплює відмову від куріння, обмеження споживання алкоголю, "
         "дотримання принципів здорового харчування, регулярна фізична активність, "
         "зменшення ваги у разі її надлишку та управління стресом.\n\n"
-        "Тютюнопаління: Усі види вживання тютюну є доведеним чинником серцево-судинних захворювань. "
-        "Нікотин сприяє підвищенню тиску та прискоренню пульсу.\n\n"
-        "Високий рівень холестерину: Якщо Вам було призначено препарати для лікування "
-        "порушень ліпідного обміну (статини), обов’язково приймайте їх. Це допоможе сповільнити "
-        "прогресування атеросклерозу.\n\n"
-        "Вага: В ідеалі Ви маєте знати свій індекс маси тіла (норма < 25) та обвід талії "
-        "(норма у жінок < 80 см, у чоловіків < 94 см).\n\n"
-        "Психологічний стан: Стрес може бути пусковим механізмом підвищення АТ."
+        "Тютюнопаління: Усі види вживання тютюну є доведеним чинником серцево-судинних захворювань.\n\n"
+        "Високий рівень холестерину: Обов’язково ознайомтеся з рекомендаціями щодо здорового харчування. "
+        "Якщо призначено статини, обов’язково приймайте їх.\n\n"
+        "Вага: Слідкуйте за вагою. В ідеалі Ви маєте знати свій індекс маси тіла (норма < 25) "
+        "та обвід талії (норма у жінок < 80 см, у чоловіків < 94 см).\n\n"
+        "Фізична активність: 30-45 хвилин ходьби щодня або хоча б 5 разів на тиждень.\n\n"
+        "Здорове харчування: Зменшіть споживання солі та солодкого. Пийте воду замість солодких напоїв."
     )
     pdf.multi_cell(0, 6, recommendations_text)
 
