@@ -1,42 +1,33 @@
 from fpdf import FPDF
 import os
 import pandas as pd
+
 class PDF(FPDF):
     def header(self):
-        # Простий заголовок на кожній сторінці
         try:
             self.set_font('CustomFont', 'I', 8)
-            self.set_text_color(128, 128, 128) # Сірий колір
+            self.set_text_color(128, 128, 128)
             self.cell(0, 10, 'HealthScreening System Report', 0, 1, 'R')
             self.ln(2)
-        except:
-            pass
+        except: pass
 
     def footer(self):
         pass
 
 def create_report(patient_name, date_str, verdict, score, data_dict):
-    """
-    Генерує стильний PDF з підтримкою кирилиці для опитувальників.
-    """
+    """Генерує PDF для опитувальників."""
     pdf = PDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # === 1. НАЛАШТУВАННЯ ШРИФТУ ===
     font_path = 'Arial.ttf' 
-    if not os.path.exists(font_path):
-        font_path = 'DejaVuSans.ttf' # Запасний варіант
+    if not os.path.exists(font_path): font_path = 'DejaVuSans.ttf'
+    if not os.path.exists(font_path): return b"ERROR: Font file not found."
 
-    if not os.path.exists(font_path):
-        return b"ERROR: Font file (Arial.ttf) not found."
-
-    # Реєструємо шрифти
     pdf.add_font('CustomFont', '', font_path, uni=True)
     pdf.add_font('CustomFont', 'B', font_path, uni=True)
     pdf.add_font('CustomFont', 'I', font_path, uni=True)
     
-    # === 2. ШАПКА ЗВІТУ (БЛОК ПАЦІЄНТА) ===
     pdf.set_fill_color(245, 245, 245)
     pdf.rect(10, 20, 190, 30, 'F')
     
@@ -48,10 +39,8 @@ def create_report(patient_name, date_str, verdict, score, data_dict):
     pdf.set_font('CustomFont', '', 12)
     pdf.set_text_color(0, 0, 0)
     pdf.cell(0, 8, f"ПІБ: {patient_name}  |  Дата: {date_str}", 0, 1, 'C')
-    
     pdf.ln(15)
 
-    # === 3. КОРОТКЕ РЕЗЮМЕ ===
     pdf.set_font('CustomFont', 'B', 14)
     pdf.set_text_color(44, 62, 80)
     pdf.cell(0, 10, "Зведення результатів", 0, 1, 'L')
@@ -65,9 +54,7 @@ def create_report(patient_name, date_str, verdict, score, data_dict):
     pdf.multi_cell(0, 6, verdict)
     pdf.ln(10)
 
-    # === 4. ДЕТАЛІЗАЦІЯ (ТАБЛИЦЯ) ===
     fill_row = False 
-
     for key, value in data_dict.items():
         safe_key = str(key).strip()
         safe_val = str(value).strip()
@@ -75,7 +62,6 @@ def create_report(patient_name, date_str, verdict, score, data_dict):
         if safe_key.startswith("==="):
             pdf.ln(5) 
             clean_title = safe_key.replace("===", "").strip()
-            
             pdf.set_fill_color(44, 62, 80)
             pdf.set_text_color(255, 255, 255)
             pdf.set_font('CustomFont', 'B', 12)
@@ -95,16 +81,13 @@ def create_report(patient_name, date_str, verdict, score, data_dict):
             pdf.ln(2)
             continue
 
-        if fill_row:
-            pdf.set_fill_color(245, 245, 245)
-        else:
-            pdf.set_fill_color(255, 255, 255)
+        if fill_row: pdf.set_fill_color(245, 245, 245)
+        else: pdf.set_fill_color(255, 255, 255)
 
         w_question = 140
         w_answer = 50
         
-        if pdf.get_y() > 270:
-            pdf.add_page()
+        if pdf.get_y() > 270: pdf.add_page()
         
         pdf.set_font('CustomFont', '', 10)
         y_start = pdf.get_y()
@@ -125,6 +108,7 @@ def create_report(patient_name, date_str, verdict, score, data_dict):
 
 
 def create_lab_report(patient_name, dob_str, date_str, record):
+    """Генерує PDF-звіт по лабораторних аналізах з кольоровою розміткою."""
     pdf = PDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -148,7 +132,6 @@ def create_lab_report(patient_name, dob_str, date_str, record):
     pdf.cell(0, 6, f"Дата проведення скринінгу: {date_str}", 0, 1)
     pdf.ln(5)
 
-    # --- ЗАГОЛОВОК ТАБЛИЦІ ---
     pdf.set_font('CustomFont', 'B', 14)
     pdf.cell(0, 10, "Результати досліджень", 0, 1, 'C')
     
@@ -162,56 +145,92 @@ def create_lab_report(patient_name, dob_str, date_str, record):
     pdf.cell(w_ref, 8, "Референтні значення", border=1, align='C', fill=True)
     pdf.ln()
 
-    # --- ДАНІ ТАБЛИЦІ ---
+    # --- ФУНКЦІЯ ОЦІНКИ ДЛЯ PDF ---
+    def get_color_rgb(test_key, val_str):
+        if pd.isna(val_str) or str(val_str).strip() in ["", "nan", "—", "-"]: return (0, 0, 0)
+        val_clean = str(val_str).replace(',', '.').strip().lower()
+        if val_clean in ["н/в", "не виявлено", "негативний"]: return (0, 128, 0) # Зелений
+        
+        try: v = float(val_clean)
+        except: return (200, 150, 0) # Жовтий
+        
+        ranges = {
+            'Lab_Total_Chol': (0, 5.2), 'Lab_Non_HDL': (0, 4.89), 'Lab_LDL': (0, 2.59), 'Lab_TG': (0, 2.3),
+            'Lab_WBC': (4.0, 10.0), 'Lab_LYM': (0.6, 4.1), 'Lab_MID': (0.1, 1.8), 'Lab_GRA': (2.0, 7.8),
+            'Lab_LYM_perc': (20.0, 50.0), 'Lab_MID_perc': (1.0, 15.0), 'Lab_GRA_perc': (40.0, 70.0),
+            'Lab_RBC': (3.8, 5.8), 'Lab_HGB': (110, 173), 'Lab_HCT': (30.0, 50.0),
+            'Lab_MCV': (84, 98), 'Lab_MCH': (27.5, 32.4), 'Lab_MCHC': (317, 342),
+            'Lab_PLT': (100, 300), 'Lab_PCT': (0.1, 0.5),
+            'Lab_SG': (1.005, 1.025), 'Lab_pH': (5.5, 7.0), 'Lab_Protein': (0, 0.15), 'Lab_UBG': (0, 17)
+        }
+        
+        c_green, c_yellow, c_red = (0, 128, 0), (200, 150, 0), (200, 0, 0)
+
+        if test_key == 'Lab_HbA1c':
+            if v <= 5.7: return c_green
+            elif v <= 6.4: return c_yellow
+            else: return c_red
+            
+        if test_key in ranges:
+            min_v, max_v = ranges[test_key]
+            if min_v <= v <= max_v: return c_green
+            margin = (max_v - min_v) * 0.15 if max_v != float('inf') else min_v * 0.15
+            if min_v == 0: margin = max_v * 0.15
+            if (min_v - margin) <= v <= (max_v + margin): return c_yellow
+            return c_red
+        return (0, 0, 0)
+
     def get_val(key):
         val = record.get(key, "")
         if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() == "nan": return "—"
         return str(val)
 
+    # --- СТРУКТУРА АНАЛІЗІВ ЯК У ДОКУМЕНТІ ---
     lab_data = [
         {"cat": "Профіль ліпідів", "items": [
-            {"name": "Загальний холестерин (total-C)", "res": get_val("Lab_Total_Chol"), "unit": "ммоль/л", "ref": "< 5,2"},
-            {"name": "Холестерин автом. (non-HDL-C)", "res": get_val("Lab_Non_HDL"), "unit": "ммоль/л", "ref": "< 4,89"},
-            {"name": "ЛНПЩ (LDL-C)", "res": get_val("Lab_LDL"), "unit": "ммоль/л", "ref": "< 2,59"},
-            {"name": "Тригліцериди (TG)", "res": get_val("Lab_TG"), "unit": "ммоль/л", "ref": "< 2,3"}
+            {"key": "Lab_Total_Chol", "name": "Загальний холестерин (total-C)", "unit": "ммоль/л", "ref": "< 5,2"},
+            {"key": "Lab_Non_HDL", "name": "Холестерин автом. (non-HDL-C)", "unit": "ммоль/л", "ref": "< 4,89"},
+            {"key": "Lab_LDL", "name": "ЛНПЩ (LDL-C)", "unit": "ммоль/л", "ref": "< 2,59"},
+            {"key": "Lab_TG", "name": "Тригліцериди (TG)", "unit": "ммоль/л", "ref": "< 2,3"}
         ]},
         {"cat": "Глікований гемоглобін", "items": [
-            {"name": "HbA1c", "res": get_val("Lab_HbA1c"), "unit": "%", "ref": "4.5 - 5.7"}
+            {"key": "Lab_HbA1c", "name": "HbA1c", "unit": "%", "ref": "4.5 - 5.7"}
         ]},
         {"cat": "Загальний аналіз крові", "items": [
-            {"name": "Лейкоцити (WBC)", "res": get_val("Lab_WBC"), "unit": "×10⁹/л", "ref": "4,00-10,0"},
-            {"name": "Лімфоцити (LYM)", "res": get_val("Lab_LYM"), "unit": "×10⁹/л", "ref": "0,6-4,1"},
-            {"name": "Моноцити, еозинофіли, базофіли", "res": get_val("Lab_MID"), "unit": "×10⁹/л", "ref": "0,1-1,8"},
-            {"name": "Гранулоцити (GRA)", "res": get_val("Lab_GRA"), "unit": "×10⁹/л", "ref": "2,0-7,8"},
-            {"name": "LYM%", "res": get_val("Lab_LYM_perc"), "unit": "%", "ref": "20,0-50,0"},
-            {"name": "MID%", "res": get_val("Lab_MID_perc"), "unit": "%", "ref": "1,0-15,0"},
-            {"name": "GRA%", "res": get_val("Lab_GRA_perc"), "unit": "%", "ref": "40,0-70,0"},
-            {"name": "Еритроцити (RBC)", "res": get_val("Lab_RBC"), "unit": "×10¹²/л", "ref": "3,8-5,8"},
-            {"name": "Гемоглобін (HGB)", "res": get_val("Lab_HGB"), "unit": "г/л", "ref": "110-173"},
-            {"name": "Гематокрит (HCT)", "res": get_val("Lab_HCT"), "unit": "%", "ref": "30,0-50,0"},
-            {"name": "MCV", "res": get_val("Lab_MCV"), "unit": "fl", "ref": "84-98"},
-            {"name": "MCH", "res": get_val("Lab_MCH"), "unit": "pg", "ref": "27,5-32,4"},
-            {"name": "MCHC", "res": get_val("Lab_MCHC"), "unit": "г/л", "ref": "317-342"},
-            {"name": "Тромбоцити (PLT)", "res": get_val("Lab_PLT"), "unit": "×10⁹/л", "ref": "100-300"},
-            {"name": "Тромбокрит (PCT)", "res": get_val("Lab_PCT"), "unit": "%", "ref": "0,1-0,5"}
+            {"key": "Lab_WBC", "name": "Лейкоцити (WBC)", "unit": "×10⁹/л", "ref": "4,00-10,0"},
+            {"key": "Lab_LYM", "name": "Лімфоцити (LYM)", "unit": "×10⁹/л", "ref": "0,6-4,1"},
+            {"key": "Lab_MID", "name": "Моноцити, еозинофіли, базофіли", "unit": "×10⁹/л", "ref": "0,1-1,8"},
+            {"key": "Lab_GRA", "name": "Гранулоцити (GRA)", "unit": "×10⁹/л", "ref": "2,0-7,8"},
+            {"key": "Lab_LYM_perc", "name": "LYM%", "unit": "%", "ref": "20,0-50,0"},
+            {"key": "Lab_MID_perc", "name": "MID%", "unit": "%", "ref": "1,0-15,0"},
+            {"key": "Lab_GRA_perc", "name": "GRA%", "unit": "%", "ref": "40,0-70,0"},
+            {"key": "Lab_RBC", "name": "Еритроцити (RBC)", "unit": "×10¹²/л", "ref": "3,8-5,8"},
+            {"key": "Lab_HGB", "name": "Гемоглобін (HGB)", "unit": "г/л", "ref": "110-173"},
+            {"key": "Lab_HCT", "name": "Гематокрит (HCT)", "unit": "%", "ref": "30,0-50,0"},
+            {"key": "Lab_MCV", "name": "MCV", "unit": "fl", "ref": "84-98"},
+            {"key": "Lab_MCH", "name": "MCH", "unit": "pg", "ref": "27,5-32,4"},
+            {"key": "Lab_MCHC", "name": "MCHC", "unit": "г/л", "ref": "317-342"},
+            {"key": "Lab_PLT", "name": "Тромбоцити (PLT)", "unit": "×10⁹/л", "ref": "100-300"},
+            {"key": "Lab_PCT", "name": "Тромбокрит (PCT)", "unit": "%", "ref": "0,1-0,5"}
         ]},
         {"cat": "Загальний аналіз сечі", "items": [
-            {"name": "Питома вага", "res": get_val("Lab_SG"), "unit": "-", "ref": "1.005 - 1.025"},
-            {"name": "pH", "res": get_val("Lab_pH"), "unit": "-", "ref": "5.5 - 7.0"},
-            {"name": "Білок", "res": get_val("Lab_Protein"), "unit": "г/л", "ref": "< 0.15"},
-            {"name": "Глюкоза", "res": get_val("Lab_Glucose"), "unit": "ммоль/л", "ref": "не виявлено"},
-            {"name": "Кетонові тіла", "res": get_val("Lab_Ketones"), "unit": "ммоль/л", "ref": "не виявлено"},
-            {"name": "Білірубін (BIL)", "res": get_val("Lab_BIL"), "unit": "мкмоль/л", "ref": "не виявлено"},
-            {"name": "Уробіліноген (UBG)", "res": get_val("Lab_UBG"), "unit": "мкмоль/л", "ref": "0 - 17"},
-            {"name": "Нітрити (NIT)", "res": get_val("Lab_NIT"), "unit": "-", "ref": "негативний"},
-            {"name": "Лейкоцити (сеча)", "res": get_val("Lab_U_WBC"), "unit": "лейко/мкл", "ref": "не виявлено"},
-            {"name": "Еритроцити (сеча)", "res": get_val("Lab_U_RBC"), "unit": "еритр/мкл", "ref": "не виявлено"}
+            {"key": "Lab_SG", "name": "Питома вага", "unit": "-", "ref": "1.005 - 1.025"},
+            {"key": "Lab_pH", "name": "pH", "unit": "-", "ref": "5.5 - 7.0"},
+            {"key": "Lab_Protein", "name": "Білок", "unit": "г/л", "ref": "< 0.15"},
+            {"key": "Lab_Glucose", "name": "Глюкоза", "unit": "ммоль/л", "ref": "не виявлено"},
+            {"key": "Lab_Ketones", "name": "Кетонові тіла", "unit": "ммоль/л", "ref": "не виявлено"},
+            {"key": "Lab_BIL", "name": "Білірубін (BIL)", "unit": "мкмоль/л", "ref": "не виявлено"},
+            {"key": "Lab_UBG", "name": "Уробіліноген (UBG)", "unit": "мкмоль/л", "ref": "0 - 17"},
+            {"key": "Lab_NIT", "name": "Нітрити (NIT)", "unit": "-", "ref": "негативний"},
+            {"key": "Lab_U_WBC", "name": "Лейкоцити (сеча)", "unit": "лейко/мкл", "ref": "не виявлено"},
+            {"key": "Lab_U_RBC", "name": "Еритроцити (сеча)", "unit": "еритр/мкл", "ref": "не виявлено"}
         ]}
     ]
 
     for category in lab_data:
         pdf.set_fill_color(240, 240, 240)
         pdf.set_font('CustomFont', 'B', 10)
+        pdf.set_text_color(0, 0, 0)
         pdf.cell(190, 8, category["cat"], border=1, fill=True, ln=1)
         
         pdf.set_font('CustomFont', '', 10)
@@ -221,12 +240,24 @@ def create_lab_report(patient_name, dob_str, date_str, record):
                 pdf.add_page()
                 y_before = pdf.get_y()
 
+            res_val = get_val(item["key"])
+            rgb_color = get_color_rgb(item["key"], res_val)
+
             pdf.multi_cell(w_comp, 8, item["name"], border=1)
             y_after = pdf.get_y()
             h_row = y_after - y_before
             
             pdf.set_xy(10 + w_comp, y_before)
-            pdf.cell(w_res, h_row, item["res"], border=1, align='C')
+            
+            # Друкуємо результат з кольором СВІТЛОФОРА
+            pdf.set_font('CustomFont', 'B', 10)
+            pdf.set_text_color(*rgb_color)
+            pdf.cell(w_res, h_row, res_val, border=1, align='C')
+            
+            # Повертаємо чорний для одиниць та норми
+            pdf.set_font('CustomFont', '', 10)
+            pdf.set_text_color(0, 0, 0)
+            
             pdf.cell(w_unit, h_row, item["unit"], border=1, align='C')
             pdf.cell(w_ref, h_row, item["ref"], border=1, align='C')
             pdf.ln()
