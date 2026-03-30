@@ -146,13 +146,22 @@ def create_lab_report(patient_name, dob_str, date_str, record):
     pdf.ln()
 
     # --- ФУНКЦІЯ ОЦІНКИ ДЛЯ PDF ---
+# --- ФУНКЦІЯ ОЦІНКИ ДЛЯ PDF ---
     def get_color_rgb(test_key, val_str):
         if pd.isna(val_str) or str(val_str).strip() in ["", "nan", "—", "-"]: return (0, 0, 0)
-        val_clean = str(val_str).replace(',', '.').strip().lower()
-        if val_clean in ["н/в", "не виявлено", "негативний"]: return (0, 128, 0) # Зелений
         
-        try: v = float(val_clean)
-        except: return (200, 150, 0) # Жовтий
+        val_clean = str(val_str).replace(',', '.').strip().lower()
+        
+        # Перетворюємо текстові "нулі" на математичний нуль
+        zero_words = ["н/в", "не виявлено", "негативний", "негативно", "відсутні", "немає", "abs", "neg"]
+        
+        if val_clean in zero_words:
+            v = 0.0
+        else:
+            try: 
+                v = float(val_clean)
+            except: 
+                return (200, 150, 0) # Жовтий для незрозумілого тексту
         
         ranges = {
             'Lab_Total_Chol': (0, 5.2), 'Lab_Non_HDL': (0, 4.89), 'Lab_LDL': (0, 2.59), 'Lab_TG': (0, 2.3),
@@ -161,7 +170,11 @@ def create_lab_report(patient_name, dob_str, date_str, record):
             'Lab_RBC': (3.8, 5.8), 'Lab_HGB': (110, 173), 'Lab_HCT': (30.0, 50.0),
             'Lab_MCV': (84, 98), 'Lab_MCH': (27.5, 32.4), 'Lab_MCHC': (317, 342),
             'Lab_PLT': (100, 300), 'Lab_PCT': (0.1, 0.5),
-            'Lab_SG': (1.005, 1.025), 'Lab_pH': (5.5, 7.0), 'Lab_Protein': (0, 0.15), 'Lab_UBG': (0, 17)
+            'Lab_SG': (1.005, 1.025), 'Lab_pH': (5.5, 7.0), 'Lab_Protein': (0, 0.15), 'Lab_UBG': (0, 17),
+            
+            # ДОДАНО: Аналізи, де норма - це тільки 0
+            'Lab_Glucose': (0, 0), 'Lab_Ketones': (0, 0), 'Lab_BIL': (0, 0), 
+            'Lab_NIT': (0, 0), 'Lab_U_WBC': (0, 0), 'Lab_U_RBC': (0, 0)
         }
         
         c_green, c_yellow, c_red = (0, 128, 0), (200, 150, 0), (200, 0, 0)
@@ -173,11 +186,18 @@ def create_lab_report(patient_name, dob_str, date_str, record):
             
         if test_key in ranges:
             min_v, max_v = ranges[test_key]
+            
             if min_v <= v <= max_v: return c_green
+            
+            # Якщо норма = 0, будь-яке відхилення - патологія
+            if max_v == 0: return c_red
+            
             margin = (max_v - min_v) * 0.15 if max_v != float('inf') else min_v * 0.15
             if min_v == 0: margin = max_v * 0.15
+            
             if (min_v - margin) <= v <= (max_v + margin): return c_yellow
             return c_red
+            
         return (0, 0, 0)
 
     def get_val(key):
