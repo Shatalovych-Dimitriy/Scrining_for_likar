@@ -3,17 +3,14 @@ import pandas as pd
 import base64
 import urllib.parse
 from modules import pdf_gen 
-from streamlit_pdf_viewer import pdf_viewer
 
 # ==========================================
 # 🛑 НАЛАШТУВАННЯ ВАШОЇ ГУГЛ ФОРМИ
 # ==========================================
 FORM_BASE_URL = "https://docs.google.com/forms/d/e/1FAIpQLSfWddfzYXY0O1ftLHcfjaxMPyDAlB73JpSFtVRhL4i1C8mMwQ/viewform"
 
-ENTRY_PIB = "entry.541684930"       # Код для поля ПІБ
-ENTRY_DOB = "entry.376367893"       # Код для поля Дата народження
-# Код для холестерину тут більше не потрібен, бо ми не передаємо його з програми у форму
-# ==========================================
+ENTRY_PIB = "entry.541684930"       
+ENTRY_DOB = "entry.376367893"       
 
 TESTS_CONFIG = [
     {"tag": "Score2",   "name": "SCORE-2 (Серцевий ризик)", "search_key": "SCORE2", "has_score": False},
@@ -24,8 +21,52 @@ TESTS_CONFIG = [
     {"tag": "Smoke",    "name": "Нікотинова залежність",   "search_key": "Паління",  "has_score": True}
 ]
 
+# --- ЛОГІКА СВІТЛОФОРА ДЛЯ АНАЛІЗІВ ---
+def get_lab_status(test_key, val_str):
+    if pd.isna(val_str) or str(val_str).strip() in ["", "nan", "—", "-"]:
+        return "—", "⚪"
+    
+    val_clean = str(val_str).replace(',', '.').strip().lower()
+    
+    # Текстові результати (Норма)
+    if val_clean in ["н/в", "не виявлено", "негативний"]: 
+        return str(val_str), "🟢"
+        
+    try: v = float(val_clean)
+    except: return str(val_str), "🟡" # Якщо текст не розпізнано, ставимо жовтий
+
+    # Референтні значення (min, max)
+    ranges = {
+        'Lab_Total_Chol': (0, 5.2), 'Lab_Non_HDL': (0, 4.89), 'Lab_LDL': (0, 2.59), 'Lab_TG': (0, 2.3),
+        'Lab_WBC': (4.0, 10.0), 'Lab_LYM': (0.6, 4.1), 'Lab_MID': (0.1, 1.8), 'Lab_GRA': (2.0, 7.8),
+        'Lab_LYM_perc': (20.0, 50.0), 'Lab_MID_perc': (1.0, 15.0), 'Lab_GRA_perc': (40.0, 70.0),
+        'Lab_RBC': (3.8, 5.8), 'Lab_HGB': (110, 173), 'Lab_HCT': (30.0, 50.0),
+        'Lab_MCV': (84, 98), 'Lab_MCH': (27.5, 32.4), 'Lab_MCHC': (317, 342),
+        'Lab_PLT': (100, 300), 'Lab_PCT': (0.1, 0.5),
+        'Lab_SG': (1.005, 1.025), 'Lab_pH': (5.5, 7.0), 'Lab_Protein': (0, 0.15), 'Lab_UBG': (0, 17)
+    }
+
+    # Специфічне правило для Глікованого гемоглобіну
+    if test_key == 'Lab_HbA1c':
+        if v <= 5.7: return str(val_str), "🟢"
+        elif v <= 6.4: return str(val_str), "🟡"
+        else: return str(val_str), "🔴"
+
+    # Перевірка для інших аналізів
+    if test_key in ranges:
+        min_v, max_v = ranges[test_key]
+        if min_v <= v <= max_v: return str(val_str), "🟢"
+        
+        # Відхилення 15% - це Жовта зона
+        margin = (max_v - min_v) * 0.15 if max_v != float('inf') else min_v * 0.15
+        if min_v == 0: margin = max_v * 0.15
+        
+        if (min_v - margin) <= v <= (max_v + margin): return str(val_str), "🟡"
+        return str(val_str), "🔴"
+        
+    return str(val_str), "⚪"
+
 def show_dashboard(df):
-    """Головний екран."""
     st.header("🗂 Картка пацієнта")
 
     search_col = 'ПІБ'
@@ -39,7 +80,6 @@ def show_dashboard(df):
 
     st.divider()
     
-    # --- ІНФО-ПАНЕЛЬ ---
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         st.caption("Пацієнт")
@@ -65,65 +105,61 @@ def show_dashboard(df):
 
     st.divider()
 
-    # --- КЕРУВАННЯ АНАЛІЗАМИ ---
     st.markdown("### 🧪 Внесення лабораторних даних")
     st.info("Всі результати аналізів тепер вносяться через окрему Google Форму. Програма автоматично зчитає їх після оновлення.")
     
-    # Генеруємо посилання тільки з ПІБ та Датою
     raw_dob = record.get('Дата народження')
     try:
         if isinstance(raw_dob, pd.Timestamp): dob_for_google = raw_dob.strftime('%Y-%m-%d')
         else: dob_for_google = pd.to_datetime(str(raw_dob), dayfirst=True).strftime('%Y-%m-%d')
-    except:
-        dob_for_google = str(raw_dob)
+    except: dob_for_google = str(raw_dob)
 
-    params = {
-        ENTRY_PIB: record['ПІБ'],
-        ENTRY_DOB: dob_for_google,
-    }
+    params = { ENTRY_PIB: record['ПІБ'], ENTRY_DOB: dob_for_google }
     query_string = urllib.parse.urlencode(params)
     final_link = f"{FORM_BASE_URL}?{query_string}"
     
     col_btn1, col_btn2 = st.columns(2)
-    with col_btn1:
-        st.link_button("📝 1. Відкрити форму для вводу аналізів", final_link, type="primary", use_container_width=True)
+    with col_btn1: st.link_button("📝 1. Відкрити форму для вводу аналізів", final_link, type="primary", use_container_width=True)
     with col_btn2:
         if st.button("🔄 2. Оновити базу (Завантажити нові дані)", use_container_width=True):
             st.cache_data.clear()
             st.rerun()
-# --- ВІДОБРАЖЕННЯ АНАЛІЗІВ НА ЕКРАНІ ---
+
+    st.divider()
+
+    # --- ВІДОБРАЖЕННЯ АНАЛІЗІВ НА ЕКРАНІ ЗІ СВІТЛОФОРОМ ---
     st.subheader("🩸 Результати лабораторних аналізів")
     
-    def format_val(key):
-        val = record.get(key, "")
-        if pd.isna(val) or val == "" or str(val).strip() == "nan": return "—"
-        return str(val)
+    def render_lab(title, key):
+        val, emoji = get_lab_status(key, record.get(key, ""))
+        st.write(f"{title}: {emoji} **{val}**")
 
-    with st.expander("🔬 Переглянути внесені аналізи", expanded=True):
+    with st.expander("🔬 Переглянути внесені аналізи (Розгорнути)", expanded=True):
         col_l1, col_l2, col_l3 = st.columns(3)
         with col_l1:
             st.markdown("**(1) Ліпіди та Цукор**")
-            st.write(f"Загальний хол.: **{format_val('Lab_Total_Chol')}**")
-            st.write(f"non-HDL (SCORE2): **{format_val('Lab_Non_HDL')}**")
-            st.write(f"ЛНПЩ: **{format_val('Lab_LDL')}**")
-            st.write(f"Тригліцериди: **{format_val('Lab_TG')}**")
-            st.write(f"HbA1c: **{format_val('Lab_HbA1c')}**")
+            render_lab("Загальний хол.", "Lab_Total_Chol")
+            render_lab("non-HDL (SCORE2)", "Lab_Non_HDL")
+            render_lab("ЛНПЩ", "Lab_LDL")
+            render_lab("Тригліцериди", "Lab_TG")
+            render_lab("HbA1c", "Lab_HbA1c")
         with col_l2:
             st.markdown("**(2) Загальний крові**")
-            st.write(f"Гемоглобін (HGB): **{format_val('Lab_HGB')}**")
-            st.write(f"Еритроцити (RBC): **{format_val('Lab_RBC')}**")
-            st.write(f"Лейкоцити (WBC): **{format_val('Lab_WBC')}**")
-            st.write(f"Тромбоцити (PLT): **{format_val('Lab_PLT')}**")
-            st.write(f"ШОЕ / Гематокрит: **{format_val('Lab_HCT')}**")
+            render_lab("Гемоглобін (HGB)", "Lab_HGB")
+            render_lab("Еритроцити (RBC)", "Lab_RBC")
+            render_lab("Лейкоцити (WBC)", "Lab_WBC")
+            render_lab("Тромбоцити (PLT)", "Lab_PLT")
+            render_lab("ШОЕ / Гематокрит", "Lab_HCT")
         with col_l3:
             st.markdown("**(3) Загальний сечі**")
-            st.write(f"Білок: **{format_val('Lab_Protein')}**")
-            st.write(f"Глюкоза: **{format_val('Lab_Glucose')}**")
-            st.write(f"Кетони: **{format_val('Lab_Ketones')}**")
-            st.write(f"Лейкоцити: **{format_val('Lab_U_WBC')}**")
-            st.write(f"Еритроцити: **{format_val('Lab_U_RBC')}**")
+            render_lab("Білок", "Lab_Protein")
+            render_lab("Глюкоза", "Lab_Glucose")
+            render_lab("Кетони", "Lab_Ketones")
+            render_lab("Лейкоцити", "Lab_U_WBC")
+            render_lab("Еритроцити", "Lab_U_RBC")
 
-    # --- ОПИТУВАЛЬНИКИ ---
+    st.divider()
+
     st.subheader("📊 Показники здоров'я (Опитувальники)")
     cols = st.columns(3)
     for index, test in enumerate(TESTS_CONFIG):
@@ -147,28 +183,18 @@ def _draw_test_card(record, test_conf):
             st.markdown("⚪ *Не пройдено / Немає даних*")
         else:
             v_str = str(verdict)
-            if any(x in v_str for x in ["Тяжк", "Клінічн", "Високий", "Залежність", "🔴"]):
-                st.error(v_str)
-            elif any(x in v_str for x in ["Помірн", "Середн", "Увага", "🟠", "🟡"]):
-                st.warning(v_str)
-            else:
-                st.success(v_str)
-            if score is not None:
-                st.caption(f"Бали: {score}")
+            if any(x in v_str for x in ["Тяжк", "Клінічн", "Високий", "Залежність", "🔴"]): st.error(v_str)
+            elif any(x in v_str for x in ["Помірн", "Середн", "Увага", "🟠", "🟡"]): st.warning(v_str)
+            else: st.success(v_str)
+            if score is not None: st.caption(f"Бали: {score}")
 
 def _render_pdf_section(record, patient_name):
     st.subheader("📄 Друк результатів")
-    
     tab1, tab2 = st.tabs(["Звіт по Аналізах (Новий)", "Звіт по Опитувальниках"])
     
-    # ==========================================
-    # ТАБ 1: НОВИЙ ЗВІТ ПО АНАЛІЗАХ (Як у Word)
-    # ==========================================
     with tab1:
-        st.write("Формує звіт у форматі медичного бланку з референтними значеннями.")
-        
+        st.write("Формує звіт у форматі медичного бланку з референтними значеннями та підсвіткою результатів.")
         try:
-            # Викликаємо НОВУ функцію з pdf_gen.py
             pdf_bytes_lab = pdf_gen.create_lab_report(
                 patient_name=patient_name,
                 dob_str=str(record.get('Дата народження', '—')).split()[0],
@@ -186,14 +212,14 @@ def _render_pdf_section(record, patient_name):
             )
             
             with st.expander("👁️ Попередній перегляд (Аналізи)"):
-                pdf_viewer(input=pdf_bytes_lab, width=700, height=800)
+                base64_pdf = base64.b64encode(pdf_bytes_lab).decode('utf-8')
+                pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="800" type="application/pdf">'
+                st.markdown(pdf_display, unsafe_allow_html=True)
+                st.caption("ℹ️ Якщо документ не відображається коректно, натисніть кнопку 'Завантажити' вище.")
                 
         except Exception as e:
             st.error(f"⚠️ Помилка генерації PDF аналізів: {e}")
 
-    # ==========================================
-    # ТАБ 2: СТАРИЙ ЗВІТ ПО ОПИТУВАЛЬНИКАХ
-    # ==========================================
     with tab2:
         final_print_dict = {}
         for test in TESTS_CONFIG:
