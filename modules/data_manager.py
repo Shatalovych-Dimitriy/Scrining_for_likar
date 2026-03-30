@@ -304,56 +304,77 @@ def get_processed_data():
     full_df['Status_Doctor_Done'] = full_df['Status_Doctor_Done'].fillna(False).astype(bool)
     full_df['Status_Patient_Done'] = full_df['Status_Patient_Done'].fillna(False).astype(bool)
 
-    # --- ЕТАП 2: ЗАВАНТАЖЕННЯ ТА ЗЛИТТЯ ВИПРАВЛЕНЬ (MERGE) ---
+# --- ЕТАП 2: MERGE ВИПРАВЛЕНЬ (З УСІМА АНАЛІЗАМИ) ---
     col_chol = '[SCORE2] Рівень non-HDL холестерину (ммоль/л)'
     
     if url_corrections:
         try:
-            # 1. Читаємо виправлення
             corr_df = pd.read_csv(url_corrections).fillna("")
-            
-            # 2. Знаходимо колонки (шукаємо "схожі" назви)
+            corr_df.columns = corr_df.columns.str.strip()
+
             c_pib = next((c for c in corr_df.columns if "піб" in c.lower() or "name" in c.lower()), None)
             c_dob = next((c for c in corr_df.columns if "дат" in c.lower() or "dob" in c.lower()), None)
-            c_val = next((c for c in corr_df.columns if "chol" in c.lower() or "холест" in c.lower()), None)
 
-            if c_pib and c_dob and c_val:
-                # 3. Готуємо таблицю виправлень до формату основної
+            if c_pib and c_dob:
                 corr_clean = pd.DataFrame()
                 corr_clean['ПІБ'] = corr_df[c_pib].astype(str).str.strip()
-                
-                # Та сама МАГІЯ ДАТ: Pandas сам розбереться з 1980-01-25 vs 25.01.1980
                 corr_clean['Дата народження'] = pd.to_datetime(corr_df[c_dob], dayfirst=True, errors='coerce')
-                
-                # Чистимо числа (заміна коми на крапку)
-                corr_clean['Chol_New'] = corr_df[c_val].astype(str).str.replace(',', '.', regex=False)
-                corr_clean['Chol_New'] = pd.to_numeric(corr_clean['Chol_New'], errors='coerce')
-                
-                # Прибираємо пусті дати/числа
-                corr_clean = corr_clean.dropna(subset=['ПІБ', 'Дата народження', 'Chol_New'])
-                
-                # Лишаємо тільки останнє виправлення для пацієнта
+
+                # Розумний пошук УСІХ аналізів за ключовими словами
+                for col in corr_df.columns:
+                    cl = col.lower()
+                    if "загальний холест" in cl or "total-c" in cl: corr_clean['Lab_Total_Chol'] = corr_df[col]
+                    elif "non-hdl" in cl: corr_clean['Lab_Non_HDL'] = corr_df[col]
+                    elif "лнпщ" in cl or "ldl" in cl: corr_clean['Lab_LDL'] = corr_df[col]
+                    elif "тригліцериди" in cl or "tg" in cl: corr_clean['Lab_TG'] = corr_df[col]
+                    elif "hba1c" in cl: corr_clean['Lab_HbA1c'] = corr_df[col]
+                    elif "wbc" in cl and "лейкоцити" in cl: corr_clean['Lab_WBC'] = corr_df[col]
+                    elif "lym" in cl and "%" not in cl: corr_clean['Lab_LYM'] = corr_df[col]
+                    elif "mid" in cl and "%" not in cl: corr_clean['Lab_MID'] = corr_df[col]
+                    elif "gra" in cl and "%" not in cl: corr_clean['Lab_GRA'] = corr_df[col]
+                    elif "lym" in cl and "%" in cl: corr_clean['Lab_LYM_perc'] = corr_df[col]
+                    elif "mid" in cl and "%" in cl: corr_clean['Lab_MID_perc'] = corr_df[col]
+                    elif "gra" in cl and "%" in cl: corr_clean['Lab_GRA_perc'] = corr_df[col]
+                    elif "rbc" in cl and "еритроцити" in cl: corr_clean['Lab_RBC'] = corr_df[col]
+                    elif "гемоглобін" in cl or "hgb" in cl: corr_clean['Lab_HGB'] = corr_df[col]
+                    elif "гематокрит" in cl or "hct" in cl: corr_clean['Lab_HCT'] = corr_df[col]
+                    elif "mcv" in cl: corr_clean['Lab_MCV'] = corr_df[col]
+                    elif "mch" in cl and "mchc" not in cl: corr_clean['Lab_MCH'] = corr_df[col]
+                    elif "mchc" in cl: corr_clean['Lab_MCHC'] = corr_df[col]
+                    elif "тромбоцити" in cl or "plt" in cl: corr_clean['Lab_PLT'] = corr_df[col]
+                    elif "тромбокрит" in cl or "pct" in cl: corr_clean['Lab_PCT'] = corr_df[col]
+                    elif "питома вага" in cl: corr_clean['Lab_SG'] = corr_df[col]
+                    elif "ph" in cl: corr_clean['Lab_pH'] = corr_df[col]
+                    elif "білок" in cl: corr_clean['Lab_Protein'] = corr_df[col]
+                    elif "глюкоза" in cl: corr_clean['Lab_Glucose'] = corr_df[col]
+                    elif "кетонові" in cl: corr_clean['Lab_Ketones'] = corr_df[col]
+                    elif "білірубін" in cl or "bil" in cl: corr_clean['Lab_BIL'] = corr_df[col]
+                    elif "уробіліноген" in cl or "ubg" in cl: corr_clean['Lab_UBG'] = corr_df[col]
+                    elif "нітрити" in cl or "nit" in cl: corr_clean['Lab_NIT'] = corr_df[col]
+                    elif "лейкоцити" in cl and "wbc" not in cl: corr_clean['Lab_U_WBC'] = corr_df[col] # Сеча
+                    elif "еритроцити" in cl and "rbc" not in cl: corr_clean['Lab_U_RBC'] = corr_df[col] # Сеча
+
+                # Очистка всіх знайдених аналізів (заміна коми на крапку)
+                for c in corr_clean.columns:
+                    if c.startswith('Lab_'):
+                        corr_clean[c] = corr_clean[c].astype(str).str.replace(',', '.', regex=False).str.strip()
+                        corr_clean.loc[corr_clean[c] == 'nan', c] = ""
+
+                corr_clean = corr_clean.dropna(subset=['ПІБ', 'Дата народження'])
                 corr_clean = corr_clean.drop_duplicates(subset=['ПІБ', 'Дата народження'], keep='last')
 
-                # 4. РОБИМО MERGE (ЛІВЕ З'ЄДНАННЯ)
-                # Ми приєднуємо виправлення до основної таблиці по ПІБ і Даті
+                # Приєднуємо всі 30 колонок до основної таблиці
                 full_df = pd.merge(full_df, corr_clean, on=['ПІБ', 'Дата народження'], how='left')
                 
-                # 5. ПІДМІНА ДАНИХ (COMBINE_FIRST)
-                # Якщо є Chol_New -> беремо його. Якщо немає -> залишаємо старе.
-                if col_chol not in full_df.columns: full_df[col_chol] = 0.0
-                
-                # combine_first працює навпаки: заповнює пропуски в першому аргументі другим
-                # Тому ми беремо Chol_New і заповнюємо його пропуски старим значенням
-                full_df[col_chol] = full_df['Chol_New'].combine_first(full_df[col_chol])
-                
-                # Прибираємо технічну колонку
-                full_df = full_df.drop(columns=['Chol_New'])
-                
-                print("✅ Виправлення успішно застосовані через Merge")
+                # Замінюємо холестерин для SCORE2
+                if 'Lab_Non_HDL' in full_df.columns:
+                    if col_chol not in full_df.columns: full_df[col_chol] = 0.0
+                    full_df['Temp_Chol'] = pd.to_numeric(full_df['Lab_Non_HDL'], errors='coerce')
+                    full_df[col_chol] = full_df['Temp_Chol'].combine_first(full_df[col_chol])
+                    full_df = full_df.drop(columns=['Temp_Chol'])
 
         except Exception as e:
-            print(f"❌ Помилка Merge виправлень: {e}")
+            print(f"Correction error: {e}")
 
     # --- ЕТАП 3: ФІНАЛІЗАЦІЯ ---
     
