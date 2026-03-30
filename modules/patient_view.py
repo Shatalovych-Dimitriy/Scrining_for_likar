@@ -28,14 +28,18 @@ def get_lab_status(test_key, val_str):
     
     val_clean = str(val_str).replace(',', '.').strip().lower()
     
-    # Текстові результати (Норма)
-    if val_clean in ["н/в", "не виявлено", "негативний"]: 
-        return str(val_str), "🟢"
-        
-    try: v = float(val_clean)
-    except: return str(val_str), "🟡" # Якщо текст не розпізнано, ставимо жовтий
+    # 1. Перетворюємо текстові "нулі" на математичний нуль
+    zero_words = ["н/в", "не виявлено", "негативний", "негативно", "відсутні", "немає", "abs", "neg"]
+    
+    if val_clean in zero_words:
+        v = 0.0
+    else:
+        try: 
+            v = float(val_clean)
+        except: 
+            return str(val_str), "🟡" # Якщо ввели незрозумілий текст, підсвічуємо жовтим для уваги
 
-    # Референтні значення (min, max)
+    # 2. Референтні значення (min, max)
     ranges = {
         'Lab_Total_Chol': (0, 5.2), 'Lab_Non_HDL': (0, 4.89), 'Lab_LDL': (0, 2.59), 'Lab_TG': (0, 2.3),
         'Lab_WBC': (4.0, 10.0), 'Lab_LYM': (0.6, 4.1), 'Lab_MID': (0.1, 1.8), 'Lab_GRA': (2.0, 7.8),
@@ -43,7 +47,11 @@ def get_lab_status(test_key, val_str):
         'Lab_RBC': (3.8, 5.8), 'Lab_HGB': (110, 173), 'Lab_HCT': (30.0, 50.0),
         'Lab_MCV': (84, 98), 'Lab_MCH': (27.5, 32.4), 'Lab_MCHC': (317, 342),
         'Lab_PLT': (100, 300), 'Lab_PCT': (0.1, 0.5),
-        'Lab_SG': (1.005, 1.025), 'Lab_pH': (5.5, 7.0), 'Lab_Protein': (0, 0.15), 'Lab_UBG': (0, 17)
+        'Lab_SG': (1.005, 1.025), 'Lab_pH': (5.5, 7.0), 'Lab_Protein': (0, 0.15), 'Lab_UBG': (0, 17),
+        
+        # ДОДАНО: Аналізи, де норма - це тільки 0 (або "не виявлено")
+        'Lab_Glucose': (0, 0), 'Lab_Ketones': (0, 0), 'Lab_BIL': (0, 0), 
+        'Lab_NIT': (0, 0), 'Lab_U_WBC': (0, 0), 'Lab_U_RBC': (0, 0)
     }
 
     # Специфічне правило для Глікованого гемоглобіну
@@ -55,13 +63,21 @@ def get_lab_status(test_key, val_str):
     # Перевірка для інших аналізів
     if test_key in ranges:
         min_v, max_v = ranges[test_key]
+        
+        # Якщо вписується в норму
         if min_v <= v <= max_v: return str(val_str), "🟢"
         
-        # Відхилення 15% - це Жовта зона
+        # Якщо норма - це тільки 0, то будь-яке число більше нуля - це патологія (Червоний)
+        if max_v == 0:
+            return str(val_str), "🔴"
+        
+        # Відхилення 15% - це Жовта зона (Межовий стан)
         margin = (max_v - min_v) * 0.15 if max_v != float('inf') else min_v * 0.15
         if min_v == 0: margin = max_v * 0.15
         
         if (min_v - margin) <= v <= (max_v + margin): return str(val_str), "🟡"
+        
+        # Все інше - Червона зона
         return str(val_str), "🔴"
         
     return str(val_str), "⚪"
